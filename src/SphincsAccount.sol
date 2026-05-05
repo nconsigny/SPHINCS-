@@ -18,7 +18,8 @@ contract SphincsAccount is BaseAccount {
     bytes32 public pkSeed;                   // SPHINCS+ public seed (rotatable)
     bytes32 public pkRoot;                   // SPHINCS+ Merkle root (rotatable)
 
-    error NotOwnerOrEntryPoint();
+    error NotSelfOrEntryPoint();
+    error NotEntryPoint();
 
     constructor(
         IEntryPoint ep,
@@ -38,24 +39,27 @@ contract SphincsAccount is BaseAccount {
         return _entryPoint;
     }
 
+    /// @notice Only the EntryPoint can drive `execute` / `executeBatch`.
+    /// @dev    Direct owner-EOA calls are intentionally forbidden so that the
+    ///         hybrid ECDSA + SPHINCS+ check in `_validateSignature` cannot be
+    ///         bypassed. Without this, a leaked/broken ECDSA key alone would
+    ///         authorize execution and reach `rotateKeys`/`rotateOwner` via
+    ///         the `address(this)` self-call branch.
     function _requireForExecute() internal view override {
-        require(
-            msg.sender == address(entryPoint()) || msg.sender == owner,
-            NotOwnerOrEntryPoint()
-        );
+        require(msg.sender == address(entryPoint()), NotEntryPoint());
     }
 
     /// @notice Rotate SPHINCS+ keys. Can only be called by the account itself
     ///         (via execute) or by the EntryPoint during a UserOp.
     function rotateKeys(bytes32 newPkSeed, bytes32 newPkRoot) external {
-        require(msg.sender == address(this) || msg.sender == address(entryPoint()), NotOwnerOrEntryPoint());
+        require(msg.sender == address(this) || msg.sender == address(entryPoint()), NotSelfOrEntryPoint());
         pkSeed = newPkSeed;
         pkRoot = newPkRoot;
     }
 
     /// @notice Rotate ECDSA owner.
     function rotateOwner(address newOwner) external {
-        require(msg.sender == address(this) || msg.sender == address(entryPoint()), NotOwnerOrEntryPoint());
+        require(msg.sender == address(this) || msg.sender == address(entryPoint()), NotSelfOrEntryPoint());
         require(newOwner != address(0));
         owner = newOwner;
     }
