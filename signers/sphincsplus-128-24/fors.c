@@ -44,9 +44,18 @@ static void fors_gen_leafx1(unsigned char *leaf,
 }
 
 /**
- * Interprets m as SPX_FORS_HEIGHT-bit unsigned integers.
+ * Interprets m as SPX_FORS_HEIGHT-bit unsigned integers per FIPS 205
+ * Algorithm 4 (base_2^b, MSB-first byte accumulation).
+ *
  * Assumes m contains at least SPX_FORS_HEIGHT * SPX_FORS_TREES bits.
  * Assumes indices has space for SPX_FORS_TREES integers.
+ *
+ * NOTE: this diverges from the upstream sphincs+ reference, which uses
+ * LSB-first bit accumulation (the pre-FIPS-205 SPHINCS+ convention).
+ * FIPS 205 / current PQClean is MSB-first.  For SPX_FORS_HEIGHT = 24 (a
+ * multiple of 8) this collapses to a big-endian 3-byte read of
+ * m[3*i .. 3*i+3].  Our on-chain SHA-2 verifier and Python signer have
+ * been updated to match.
  */
 static void message_to_indices(uint32_t *indices, const unsigned char *m)
 {
@@ -56,7 +65,8 @@ static void message_to_indices(uint32_t *indices, const unsigned char *m)
     for (i = 0; i < SPX_FORS_TREES; i++) {
         indices[i] = 0;
         for (j = 0; j < SPX_FORS_HEIGHT; j++) {
-            indices[i] ^= ((m[offset >> 3] >> (offset & 0x7)) & 1u) << j;
+            indices[i] = (indices[i] << 1) |
+                ((m[offset >> 3] >> (7 - (offset & 0x7))) & 1u);
             offset++;
         }
     }

@@ -54,7 +54,13 @@ def abi_encode(seed16: bytes, root16: bytes, sig: bytes) -> bytes:
 def _norm(s: str) -> str: return s.lower().removeprefix("0x")
 
 def cache_key(master_sk_hex: str, message_hex: str, sig_counter: int) -> str:
+    # Cache key includes a convention tag so that bumping signature
+    # conventions (e.g. the FORS digest LE→BE switch for FIPS 205) breaks
+    # the cache for any pre-existing fixtures.
+    CONVENTION_TAG = b"fips205-be-fors-v1"
     h = hashlib.sha256()
+    h.update(CONVENTION_TAG)
+    h.update(b"|")
     h.update(_norm(master_sk_hex).encode())
     h.update(b"|")
     h.update(_norm(message_hex).encode())

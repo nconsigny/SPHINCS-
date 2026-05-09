@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SPHINCs- is a research prototype for lightweight SPHINCS+ variants on Ethereum. Three families of on-chain verifiers live here:
 
-1. **C-series** (C7, C11 in `src/`; C6/C8/C9/C10 in `legacy/src/`) — stateless WOTS+C / FORS+C (ePrint 2025/2203), n=128. Signature-count cap = 2^h (C7 → 2²⁴, C11 → 2¹⁶); security degrades with N as shown in the variants table in the README.
+1. **C-series** (C7, C9, C11 in `src/`; C6/C8/C10 in `legacy/src/`) — stateless WOTS+C / FORS+C (ePrint 2025/2203), n=128. Signature-count cap = 2^h (C7 → 2²⁴, C9 → 2²⁰, C11 → 2¹⁶); security degrades with N as shown in the variants table in the README.
 2. **C12** (`src/SPHINCs-C12Asm.sol`) — plain SPHINCS+ (SPX) variant of the SPHINCs- family, with the JARDIN 32-byte ADRS kernel + keccak256 truncated to 16 B. h=20, d=5, a=7, k=20, w=8, l=45. 6,512-B sig, ~276 K verify gas. Cross-referenced by the JARDIN repo as `JardinSpxVerifier`.
 3. **SLH-DSA-128-24** — NIST SP 800-230 parameter set (d=1, h=22, a=24, k=6, w=4). Two variants:
    - FIPS 205 bit-exact SHA-2 (`src/SLH-DSA-SHA2-128-24verifier.sol`), uses the SHA-256 precompile at 0x02.
@@ -55,6 +55,7 @@ The **C-series, C12, and SLH-DSA-Keccak** verifiers all share the JARDIN kernel:
 | File | Purpose |
 |---|---|
 | `SPHINCs-C7Asm.sol` | C-series verifier, stateless, n=128, h=24 d=2 a=16 k=8 w=8. 3,704-B sig, ~127 K verify |
+| `SPHINCs-C9Asm.sol` | C-series verifier, stateless, n=128, h=20 d=2 a=12 k=11 w=8. 3,816-B sig, ~117 K verify |
 | `SPHINCs-C11Asm.sol` | C-series verifier, stateless, n=128, h=16 d=2 a=11 k=13 w=8. 3,976-B sig, ~116 K verify |
 | `SphincsAccount.sol` | ERC-4337 hybrid account (ECDSA + SPHINCs- C-series), verifier pluggable via immutable |
 | `SphincsAccountFactory.sol` | CREATE2 factory for `SphincsAccount` |
@@ -66,14 +67,14 @@ The **C-series, C12, and SLH-DSA-Keccak** verifiers all share the JARDIN kernel:
 
 ### Frozen variants (`legacy/`)
 
-Prior C-series verifiers (C6, C8, C9, C10) kept for benchmark reproducibility. Same 32-byte ADRS kernel, different parameters. See `legacy/README.md`.
+Prior C-series verifiers (C6, C8, C10) kept for benchmark reproducibility. Same 32-byte ADRS kernel, different parameters. See `legacy/README.md`.
 
 | Variant | h | d | a | k | w | swn | Sig | sign_h | Verify | Frame | 4337 | sec_20 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | C6 | 24 | 2 | 16 | 8 | 16 | 240 | 3352 B | 5.7M | 156K | 232K | 333K | 128 |
 | **C7** | **24** | **2** | **16** | **8** | **8** | **151** | **3704 B** | **4.3M** | **127K** | **210K** | **318K** | **128** |
 | C8 | 20 | 2 | 13 | 12 | 16 | 162 | 3848 B | 1.4M | 194K | 271K | 377K | 128 |
-| C9 | 20 | 2 | 12 | 11 | 8 | 208 | 3816 B | 1.3M | 117K | 195K | 300K | 112.6 |
+| **C9** | **20** | **2** | **12** | **11** | **8** | **208** | **3816 B** | **1.3M** | **117K** | **195K** | **300K** | **112.6** |
 | C10 | 18 | 2 | 11 | 13 | 8 | 205 | 4008 B | 609K | 115K | 203K | 308K | 104.5 |
 | **C11** | **16** | **2** | **11** | **13** | **8** | **203** | **3976 B** | **292K** | **116K** | **202K** | **308K** | **86.1** |
 

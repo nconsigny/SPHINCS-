@@ -167,16 +167,20 @@ def base_2b(X: bytes, b: int, out_len: int):
     return result
 
 def digest_indices(digest: bytes, h_param: int, a_param: int):
-    """Parse the m-byte digest into (md[0..k-1], leafIdx).
+    """Parse the m-byte digest into (md[0..k-1], leafIdx) per FIPS 205 §10.2.
 
-    Matches the sphincs/sphincsplus reference (= PQClean) convention, which
-    is the industry-standard SLH-DSA behaviour: LSB-first bit extraction
-    within each byte for FORS indices, then a big-endian read of the next
-    few bytes masked to `h_param` low bits for the leaf index.
+    FORS index list is `base_2^a(digest[:fors_bytes], k)` — Algorithm 4 with
+    MSB-first byte accumulation:
+        total = 0; bits = 0
+        for o in 0..k:
+            while bits < a:  total = (total<<8) | X[in]; in += 1; bits += 8
+            bits -= a;  out[o] = (total >> bits) & ((1<<a) - 1)
+    For a=24 (a multiple of 8) this collapses to a BIG-ENDIAN 3-byte read,
+    so for the NIST-conformant params md[t] = digest[3t..3t+3] interpreted
+    big-endian.
 
-    (This differs from a naïve MSB-first `base_2^b` read: for a=24 the
-    FORS index is effectively a LITTLE-ENDIAN 3-byte read of
-    `digest[3t..3t+3]`.)
+    `leafIdx` is a BE read of the next ⌈h/8⌉ bytes masked to h_param bits
+    (d=1 ⇒ tree_idx is empty).
     """
     fors_bits   = K * a_param
     fors_bytes  = (fors_bits + 7) // 8
@@ -184,14 +188,7 @@ def digest_indices(digest: bytes, h_param: int, a_param: int):
     assert M_LEN == fors_bytes + leaf_bytes, \
         f"m mismatch for h={h_param} a={a_param}: {fors_bytes}+{leaf_bytes} != {M_LEN}"
 
-    md = []
-    offset = 0
-    for _t in range(K):
-        idx = 0
-        for j in range(a_param):
-            idx |= ((digest[offset >> 3] >> (offset & 7)) & 1) << j
-            offset += 1
-        md.append(idx)
+    md = base_2b(digest[:fors_bytes], a_param, K)
 
     leaf_val = int.from_bytes(digest[fors_bytes:fors_bytes + leaf_bytes], "big")
     leaf_idx = leaf_val & ((1 << h_param) - 1)

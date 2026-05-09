@@ -16,7 +16,10 @@ contract SLH_DSA_SHA2_128_24_Diagnostic {
         leaf; c0; c5; c11; c17; c22; r0;
         require(sig.length == 3856, "bad sig len");
 
-        assembly ("memory-safe") {
+        // writes 0x40+/0x80+/0x600+ without
+        // updating the FMP, but exits via `return` so memory state isn't
+        // returned.
+        assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
             let seed := pkSeed
             let root := pkRoot
@@ -38,11 +41,10 @@ contract SLH_DSA_SHA2_128_24_Diagnostic {
 
             let forsBase := or(shl(176, 3), shl(144, leafIdx))
 
-            // Tree 0 only
-            let mdT := or(or(
-                and(shr(248, dWord), 0xFF),
-                shl(8,  and(shr(240, dWord), 0xFF))),
-                shl(16, and(shr(232, dWord), 0xFF)))
+            // Tree 0 only — FIPS 205 BE 24-bit read of digest[0..3]
+            //   md[0] = digest[0]<<16 | digest[1]<<8 | digest[2]
+            //         = (dWord >> 232) & 0xFFFFFF
+            let mdT := and(shr(232, dWord), 0xFFFFFF)
 
             let sk := and(calldataload(add(sigBase, 16)), N_MASK)
             mstore(0x40, or(forsBase, shl(80, mdT)))

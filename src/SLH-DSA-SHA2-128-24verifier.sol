@@ -41,7 +41,7 @@ contract SLH_DSA_SHA2_128_24_Verifier {
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external view returns (bool valid)
     {
-        assembly ("memory-safe") {
+        assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
             if iszero(eq(sig.length, 3856)) {
@@ -91,16 +91,25 @@ contract SLH_DSA_SHA2_128_24_Verifier {
             if iszero(staticcall(gas(), 0x02, 0x00, 0x44, 0x100, 0x20)) { revert(0, 0) }
             let dWord := mload(0x100)
 
-            // Digest parsing — sphincs/sphincsplus reference (= PQClean)
-            // convention, which is the industry SLH-DSA behaviour:
-            //   md[t] : LSB-first bit-extraction within each byte
-            //           = LITTLE-ENDIAN read of digest[3t..3t+3]
-            //           = byte[3t] | byte[3t+1] << 8 | byte[3t+2] << 16
-            //   leafIdx : big-endian read of digest[18..21] AND 0x3FFFFF
-            //             = low 22 bits of the 24-bit BE value at bits 88..111
-            //   (tree_idx is empty since d = 1)
+            // Digest parsing — FIPS 205 §10.2 / Algorithm 13 (fors_pkFromSig)
+            // → Algorithm 4 base_2^b(md, k):
+            //   total = 0; bits = 0;
+            //   for o in 0..k:
+            //     while bits < a:  total = (total<<8)|X[in]; in++; bits+=8
+            //     bits -= a;  out[o] = (total>>bits) & ((1<<a)-1)
             //
-            // Computed per-tree inside the FORS loop below; leafIdx here:
+            // For a = 24 (multiple of 8) this collapses to a BIG-ENDIAN
+            // 3-byte read:
+            //     md[t] = digest[3t]<<16 | digest[3t+1]<<8 | digest[3t+2]
+            //
+            // Then `leafIdx` is a BE read of digest[18..21] (22 bits, since
+            // d = 1 ⇒ tree_idx is empty).  In word form digest[18..21] sits
+            // at bit positions 88..111 of dWord, so:
+            //     leafIdx = (dWord >> 88) & 0x3FFFFF
+            //
+            // (Earlier revisions used LSB-first bit accumulation the
+            // pre-FIPS-205 SPHINCS+ reference convention.  FIPS 205 / current
+            // PQClean is MSB-first, hence BE; we follow the standard)
             let leafIdx := and(shr(88, dWord), 0x3FFFFF)
 
             // ──────────── Set up the F/H/T_l prefix layout ────────────
@@ -120,14 +129,14 @@ contract SLH_DSA_SHA2_128_24_Verifier {
 
             // ──────────────────────── FORS verify ────────────────────────
             for { let t := 0 } lt(t, 6) { t := add(t, 1) } {
-                // md[t] = LE read of digest bytes 3t, 3t+1, 3t+2
-                //       = byte_swap( BE read at word bits 232-24t .. 255-24t )
-                // Equivalent: individual byte extractions below.
-                let s := sub(232, mul(24, t))
-                let mdT := or(or(
-                    and(shr(add(s, 16), dWord), 0xFF),             // byte[3t]   at bits 0..7
-                    shl(8,  and(shr(add(s, 8),  dWord), 0xFF))),   // byte[3t+1] at bits 8..15
-                    shl(16, and(shr(s,          dWord), 0xFF)))    // byte[3t+2] at bits 16..23
+                // md[t] = BE read of digest bytes 3t, 3t+1, 3t+2 (FIPS 205
+                // base_2^a, a=24 — see Algorithm 4 for the general derivation).
+                //   digest[3t]   sits at dWord bits (248-24t)..(255-24t)
+                //   digest[3t+1] at (240-24t)..(247-24t)
+                //   digest[3t+2] at (232-24t)..(239-24t)
+                // Thus: mdT = (dWord >> (232-24t)) & 0xFFFFFF
+                //           = byte[3t]<<16 | byte[3t+1]<<8 | byte[3t+2]
+                let mdT := and(shr(sub(232, mul(24, t)), dWord), 0xFFFFFF)
                 let treeOff := add(forsOff, mul(t, 400))
                 let sk := and(calldataload(add(sigBase, treeOff)), N_MASK)
 

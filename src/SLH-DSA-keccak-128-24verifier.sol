@@ -34,7 +34,13 @@ contract SLH_DSA_Keccak_128_24_Verifier {
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external pure returns (bool valid)
     {
-        assembly ("memory-safe") {
+        // Plain assembly (not "memory-safe"): the block writes to 0x40+,
+        // 0x60+, 0x80+ … 0x100 without updating the free-memory pointer, and
+        // overwrites Solidity's zero-slot at 0x60.  Function exits via
+        // `return(0,0x20)` so memory state never re-enters Solidity-managed
+        // code, but the annotation would otherwise license memory-reordering
+        // optimisations that are unsafe under these layout assumptions.
+        assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
             if iszero(eq(sig.length, 3856)) {
