@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// @title SLH-DSA-SHA2-128-24 — FIPS 205 / NIST SP 800-230 SLH-DSA-SHA2-128-24
-/// @dev Bit-exact NIST compliance using the SHA-256 precompile (0x02).
+/// @title NIST SP 800-230 SLH-DSA-SHA2-128-24
+/// @dev Bit-exact NIST compliance using FIPS 205 guidance the SHA-256 precompile (0x02).
 ///      Parameters (NIST SP 800-230 Table 1):
 ///        n  = 16   h = 22   d = 1   h' = 22
 ///        a  = 24   k = 6    w = 4 (lgw=2)   m = 21
