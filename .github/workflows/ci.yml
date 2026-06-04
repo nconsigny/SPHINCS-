@@ -113,3 +113,32 @@ jobs:
         env:
           FOUNDRY_TEST: legacy/test
         run: forge test -vv
+
+  # ── SLH-DSA-SHA2 noble-post-quantum parity. The live SHA-2-128-24 verifier is a
+  #    FIPS 205 external SLH-DSA verify at a custom set (n=16,h=22,d=1,a=24,k=6,w=4);
+  #    a 6-edit-patched @noble/post-quantum engine reproduces it bit-for-bit. Run at
+  #    REDUCED H that is STILL > 16, so keygen exercises the widened key-pair-address
+  #    field (the patch needed for leafIdx >= 2^16), against a matching reduced C
+  #    build. noble and the C reference must agree on every byte. The full-parameter
+  #    tie to the on-chain-verified KAT is signers/noble-slh-dsa/kat-check.mjs
+  #    (a 2^22 pure-JS keygen — minutes — so it is a manual/offline gate, not here). ──
+  noble-crosscheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install + patch noble (pinned versions, build/ regenerated)
+        working-directory: signers/noble-slh-dsa
+        run: npm ci && node patch-noble.mjs
+      - name: Build REDUCED-parameter C reference signer (h=18, a=10)
+        run: make -C signers/sphincsplus-128-24 clean && make -C signers/sphincsplus-128-24 CFLAGS="-O3 -std=c99 -I. -DSPX_FULL_HEIGHT=18 -DSPX_FORS_HEIGHT=10"
+      - name: noble vs C bit-exact parity at the reduced params
+        working-directory: signers/noble-slh-dsa
+        run: |
+          SEED=$(node -e "process.stdout.write('11'.repeat(48))")
+          OPTRAND=$(node -e "process.stdout.write('00'.repeat(16))")
+          MSG=deadbeef00000000000000000000000000000000000000000000000000000000
+          node crosscheck.mjs "$SEED" "$MSG" "$OPTRAND" ../sphincsplus-128-24/slhdsa-sha2-128-24 --H 18 --A 10

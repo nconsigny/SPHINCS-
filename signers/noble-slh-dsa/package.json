@@ -1,0 +1,15 @@
+{
+  "name": "sphincs-noble-slh-dsa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "noble-post-quantum-backed SLH-DSA-SHA2-128-24 signer for the SPHINCs- on-chain verifier (NIST SP 800-230 custom param set: n=16,h=22,d=1,a=24,k=6,w=4).",
+  "scripts": {
+    "build": "node patch-noble.mjs",
+    "crosscheck": "node crosscheck.mjs"
+  },
+  "dependencies": {
+    "@noble/post-quantum": "0.6.1",
+    "@noble/hashes": "2.2.0"
+  }
+}
