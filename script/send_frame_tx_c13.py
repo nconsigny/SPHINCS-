@@ -36,7 +36,7 @@ import rlp
 from Crypto.Hash import keccak as _k
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUST_CLI = REPO_ROOT / "signer-wasm" / "target" / "release" / "signer-c13"
+RUST_CLI = REPO_ROOT / "signers/signer-wasm" / "target" / "release" / "signer-c13"
 ADDRS_JSON = REPO_ROOT / "script" / ".c13_addresses.json"
 KP_FILE = REPO_ROOT / "script" / ".c13_frame_keypair.json"
 

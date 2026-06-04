@@ -75,7 +75,7 @@ so `ht_idx(m)` is fully public and Avenue B is open.
 
 ### 2.2 The fix: bind `R` to the secret seed
 
-Post-fix (`signer-wasm/src/fors.rs::grind_r`, `script/signer.py::grind_R_fors`):
+Post-fix (`signers/signer-wasm/src/fors.rs::grind_r`, `script/signer.py::grind_R_fors`):
 
 ```
 R = mask_n(keccak256( sk_seed[32] ‖ "R_grind" ‖ message[32] ‖ nonce[32] ))
@@ -93,7 +93,7 @@ runtime randomness is required; it may optionally be hedged by folding fresh
 
 The verifier is **unchanged** — it only reads `R` from the signature. The Rust
 and Python signers use a byte-identical preimage so the cross-implementation
-oracle (`signer-wasm/tests/cross_validate.rs`) and the on-chain digest stay in
+oracle (`signers/signer-wasm/tests/cross_validate.rs`) and the on-chain digest stay in
 lock-step.
 
 ### 2.3 Residual bound (Avenue A, after the fix)
@@ -180,7 +180,7 @@ empirical guard (§4.4).
 
 ### 4.4 Regression guard
 
-`signer-wasm/tests/wots_reuse_poc.rs` constructs two messages colliding on
+`signers/signer-wasm/tests/wots_reuse_poc.rs` constructs two messages colliding on
 `ht_idx` with distinct `fors_pk`, harvests the WOTS chains both reveal, and
 asserts that the union of revealed chain values does **not** admit a valid
 WOTS+C opening (`Σ digits == 208`, every digit reachable) for a third, distinct

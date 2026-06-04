@@ -184,7 +184,7 @@ SPHINCs- and ECDSA are derived through independent paths - compromising one does
 | Signer | Language | Targets | BIP-39 |
 |---|---|---|---|
 | `script/signer.py` | Python | C-series (C7/C9/C11/C13) + SHA twins (c11-sha/c13-sha) | No |
-| `signer-wasm/` | Rust/WASM | C-series | **Yes** |
+| `signers/signer-wasm/` | Rust/WASM | C-series | **Yes** |
 | `script/slh_dsa_sha2_128_24_signer.py` | Python (slow; ~hours at NIST params) | SLH-DSA-SHA2-128-24 | No |
 | `script/slh_dsa_keccak_128_24_signer.py` | Python (slow; ~hours at NIST params) | SLH-DSA-Keccak-128-24 | No |
 | `signers/sphincsplus-128-24/` | C (forked from sphincs/sphincsplus ref) | SLH-DSA-SHA2-128-24 | No, seeds fed in |
@@ -192,7 +192,7 @@ SPHINCs- and ECDSA are derived through independent paths - compromising one does
 
 ```bash
 # Rust WASM C-series signer
-cd signer-wasm && wasm-pack build --release --target web
+cd signers/signer-wasm && wasm-pack build --release --target web
 cargo test --release -- --ignored
 
 # SLH-DSA-128-24 fast C signers (~11 min per NIST-params sign on pure C, no SHA-NI)
@@ -263,7 +263,7 @@ Current `eip-8141.ethrex.xyz` devnet (chain **3151908**, Osaka fork, frame opcod
 ```bash
 forge build
 pip install eth-account eth-abi requests pycryptodome
-cd signer-wasm && cargo build --release
+cd signers/signer-wasm && cargo build --release
 ```
 
 ## Usage
@@ -298,7 +298,7 @@ forge test --match-contract SLH_DSA_Keccak_128_24_Test -vv
 
 ```bash
 forge test
-cd signer-wasm && cargo test --release -- --ignored
+cd signers/signer-wasm && cargo test --release -- --ignored
 ```
 
 ## Formal Verification (Lean 4 / Verity)

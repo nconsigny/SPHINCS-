@@ -15,7 +15,7 @@ contract SphincsC13Test is Test {
 
     /// @dev Heavy: the Python signer for C13 takes minutes (R-grind ≈ 2^19,
     ///      6 FORS trees of 2^19 leaves, 2 WOTS+C count grinds). The Rust CLI
-    ///      under signer-wasm/target/release/signer-c13 is far faster and is
+    ///      under signers/signer-wasm/target/release/signer-c13 is far faster and is
     ///      the recommended path; this test stays on Python for parity with
     ///      the C7/C11 test pattern.
     function testC13VerifyFFI() public {
@@ -42,23 +42,23 @@ contract SphincsC13Test is Test {
 
     /// @notice Same as above but uses the Rust CLI (much faster).
     ///         Skipped if the binary is not built. Build with:
-    ///         (cd signer-wasm && cargo build --release --bin signer-c13)
+    ///         (cd signers/signer-wasm && cargo build --release --bin signer-c13)
     function testC13VerifyFFI_Rust() public {
         // Probe for the Rust CLI; skip if missing.
         string[] memory probe = new string[](3);
         probe[0] = "sh";
         probe[1] = "-c";
-        probe[2] = "test -x signer-wasm/target/release/signer-c13 && echo yes || echo no";
+        probe[2] = "test -x signers/signer-wasm/target/release/signer-c13 && echo yes || echo no";
         bytes memory probeOut = vm.ffi(probe);
         if (keccak256(probeOut) != keccak256(bytes("yes"))) {
-            emit log("Skipping Rust-CLI test: signer-wasm/target/release/signer-c13 not built");
+            emit log("Skipping Rust-CLI test: signers/signer-wasm/target/release/signer-c13 not built");
             return;
         }
 
         bytes32 message = 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef;
 
         string[] memory inputs = new string[](3);
-        inputs[0] = "signer-wasm/target/release/signer-c13";
+        inputs[0] = "signers/signer-wasm/target/release/signer-c13";
         inputs[1] = "c13";
         inputs[2] = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 

@@ -6,7 +6,7 @@
 > confers no audit-grade assurance. Treat it as a best-effort engineering review.
 
 **Scope:** Two cryptographic families, signer side and on-chain verifier side.
-1. **C13** — custom lightweight SPHINCS+ "+C" variant (ePrint 2025/2203 family), FIPS 205 §4.2 uncompressed 32-byte ADRS + keccak256. Verifier `src/SPHINCs-C13Asm.sol`; signers `signer-wasm/` (Rust), `script/signer.py`.
+1. **C13** — custom lightweight SPHINCS+ "+C" variant (ePrint 2025/2203 family), FIPS 205 §4.2 uncompressed 32-byte ADRS + keccak256. Verifier `src/SPHINCs-C13Asm.sol`; signers `signers/signer-wasm/` (Rust), `script/signer.py`.
 2. **SLH-DSA-SHA2-128-24** — NIST SP 800-230 IPD parameter set, claimed FIPS 205 bit-exact. Verifier `src/SLH-DSA-SHA2-128-24verifier.sol`; reference oracle `signers/sphincsplus-128-24/` (C), `script/slh_dsa_sha2_128_24_*signer.py`.
 
 Out of scope and **not examined**: SLH-DSA-Keccak twin, slhvk Vulkan GPU signer, C7/C9/C11/C12, legacy verifiers.
@@ -72,7 +72,7 @@ Duplicates that arose across analysis dimensions from the same root cause are me
 
 ### C13-X-f2 — Message randomizer `R` is fully public-grindable, with no secret and no message/key binding *(Medium — reconciled down from High)*
 
-**Location:** `signer-wasm/src/fors.rs:61-79` (`grind_r`); `script/signer.py:541-550`; `src/SPHINCs-C13Asm.sol:52-60, 75-83`.
+**Location:** `signers/signer-wasm/src/fors.rs:61-79` (`grind_r`); `script/signer.py:541-550`; `src/SPHINCs-C13Asm.sol:52-60, 75-83`.
 
 **What's wrong.** `R` is derived as `R = mask_n(keccak256("R_grind" ‖ u256(nonce)))`, scanning `nonce` upward until the digest satisfies the FORS+C forced-zero predicate (`(digest >> 114) & a_mask == 0`). It contains **no secret key material** and is **not a PRF of the message or sk_seed**. In standard SLH-DSA / SP 800-230, `R = PRF_msg(sk_prf, opt_rand, M)` is secret-keyed precisely so an adversary cannot offline-search for a (message, randomizer) whose FORS indices and hypertree leaf land on previously-revealed leaves. Here the entire FORS index map `md[0..5]`, the forced-zero `md[6]`, and the hypertree-leaf selector `ht_idx` are all functions of `digest = H_msg(pkSeed, pkRoot, R, M)` over public inputs and an attacker-computable `R`.
 
@@ -86,7 +86,7 @@ Duplicates that arose across analysis dimensions from the same root cause are me
 
 ### C13-X-f3 — Target-sum WOTS+C multi-reuse (min-combination) resistance is load-bearing and unproven *(Medium)*
 
-**Location:** `src/SPHINCs-C13Asm.sol:151-200` (layer loop), `:168-173` (`sum==208` is the only structural WOTS check); `signer-wasm/src/wots.rs:38-49,75-88`.
+**Location:** `src/SPHINCs-C13Asm.sol:151-200` (layer loop), `:168-173` (`sum==208` is the only structural WOTS check); `signers/signer-wasm/src/wots.rs:38-49,75-88`.
 
 **What's wrong.** WOTS+C replaces the classic monotone checksum with a fixed digit-sum constraint: the verifier reverts unless the 43 base-8 digits sum to exactly 208. The layer-0 WOTS keypair is keyed only by the hypertree leaf `(layer=0, tree=idxTree, kp=idxLeaf)` derived from `ht_idx` (22 bits). Because `ht_idx` is a hash-derived selector over 2^22 leaves, at the advertised q=2^22 cap birthday collisions are *expected* (~q²/2²³ ≈ 2²¹ colliding pairs). Each `ht_idx` collision between two messages with different `fors_pk` means the **same** layer-0 WOTS keypair signs two different WOTS-message digests — a WOTS one-time-use violation by design, absorbed only by the FORS few-time layer plus the target-sum's forgery resistance *under reuse*.
 
@@ -100,11 +100,11 @@ Duplicates that arose across analysis dimensions from the same root cause are me
 
 ### C13-S-f1 — Rust↔Python parity oracle does not compile *(Medium)*
 
-**Location:** `signer-wasm/tests/cross_validate.rs:52` (call site); `signer-wasm/src/fors.rs:12`.
+**Location:** `signers/signer-wasm/tests/cross_validate.rs:52` (call site); `signers/signer-wasm/src/fors.rs:12`.
 
 **What's wrong.** `fors::fors_secret` gained a 4th mandatory parameter `ht_idx: u32` (`fors.rs:12`: `pub fn fors_secret(sk_seed, tree_idx, leaf_idx, ht_idx)`), but the test still calls it with 3 arguments: `let fs = fors::fors_secret(sk_seed, 0, 0);`. This is a hard `E0061` compile error in the `cross_validate` test binary, which aborts the whole binary before *any* of its tests run (`test_key_derivation_matches_python`, `test_wots_secret_matches_python`, `test_fors_secret_matches_python`, `test_params`).
 
-**Evidence (empirically run).** `cd signer-wasm && cargo test --release` produced `error[E0061]: this function takes 4 arguments but 3 arguments were supplied --> tests/cross_validate.rs:52:14` and `could not compile sphincs-c13-signer (test "cross_validate")`. The sibling binary `fors_leaf_keying` compiles and its test passes, so the failure is localized. `CLAUDE.md` and `README.md` advertise `cargo test --release -- --ignored` ("9/9") as *the* signer test — that command currently cannot compile.
+**Evidence (empirically run).** `cd signers/signer-wasm && cargo test --release` produced `error[E0061]: this function takes 4 arguments but 3 arguments were supplied --> tests/cross_validate.rs:52:14` and `could not compile sphincs-c13-signer (test "cross_validate")`. The sibling binary `fors_leaf_keying` compiles and its test passes, so the failure is localized. `CLAUDE.md` and `README.md` advertise `cargo test --release -- --ignored` ("9/9") as *the* signer test — that command currently cannot compile.
 
 **Impact.** Robustness / oracle-integrity, no on-chain exploit. The cross-implementation regression guard meant to catch a Rust↔Python↔verifier byte-level desync is dead. The production signing path was independently confirmed consistent, and the security-critical per-message FORS leaf-keying fix is still covered by the separate `fors_leaf_keying.rs` binary — so the exploitability lens rated this *low*. **Reconciled: medium** as the documented test command is broken and the unit-level cross-language guard is gone (spec lens *low*, code-reality *medium*).
 
@@ -114,7 +114,7 @@ Duplicates that arose across analysis dimensions from the same root cause are me
 
 ### C13-S-f2 — Stale pinned `PY_FORS_SECRET_0_0` no longer matches `fors_secret` *(Medium)*
 
-**Location:** `signer-wasm/tests/cross_validate.rs:26, 50-54`; `signer-wasm/src/fors.rs:12-20`.
+**Location:** `signers/signer-wasm/tests/cross_validate.rs:26, 50-54`; `signers/signer-wasm/src/fors.rs:12-20`.
 
 **What's wrong.** Even after the trivial compile fix in C13-S-f1, the FORS-secret parity assertion is wrong. The fixture `PY_FORS_SECRET_0_0 = 0x644806f5...862` was generated from the **legacy** preimage `sk_seed ‖ "fors" ‖ tree_idx(4) ‖ leaf_idx(4)` (no `ht_idx`). The current Rust `fors_secret` has **no** `ht_idx=None` path — it *always* folds `ht_idx`: preimage = `sk_seed ‖ "fors" ‖ ht_idx(4) ‖ tree_idx(4) ‖ leaf_idx(4)`. So `fors_secret(sk,0,0,ht)` can never reproduce the pinned value.
 
@@ -288,7 +288,7 @@ Duplicates that arose across analysis dimensions from the same root cause are me
 
 ### C13-V-f4 / C13-S-f3 / C13-mal-f2 — Verifier hardcodes digest-shift/mask/fold literals instead of deriving from K/A/H *(Info)*
 
-**Location:** `src/SPHINCs-C13Asm.sol:60, 77, 82-83, 89, 92, 106, 121`; signer counterparts `signer-wasm/src/fors.rs:38,50,63,102`, `script/signer.py`.
+**Location:** `src/SPHINCs-C13Asm.sol:60, 77, 82-83, 89, 92, 106, 121`; signer counterparts `signers/signer-wasm/src/fors.rs:38,50,63,102`, `script/signer.py`.
 
 **What's wrong.** The verifier embeds the digest bit budget and ADRS folding as raw literals: `htIdx := shr(133,…)` mask `0x3FFFFF` (`:60`), forced-zero `shr(114,…)` mask `0x7FFFF` (`:77`), `idxLeaf0 := and(htIdx,0x7FF)` / `idxTree0 := shr(11,…)` (`:82-83`), FORS leaf fold `shl(19,i)` (`:92`), internal fold `shl(sub(18,h),i)` (`:106`), last-tree `shl(19,6)` (`:121`). These equal the parameterized signer expressions only because **A=19, K=7, H=22, SUBTREE_H=11**: 133=K·A, 114=(K−1)·A, 0x3FFFFF=2^H−1, 0x7FFFF=2^A−1, 19=A, 18=A−1, 0x7FF=2^SUBTREE_H−1. The signers derive all of these symbolically (`fors.rs:63 (K-1)*A`, `:102 K*A`; `signer.py (k-1)*a`, `k*a`).
 
@@ -312,7 +312,7 @@ Duplicates that arose across analysis dimensions from the same root cause are me
 
 ### C13-V-f3 — Stale/misleading comments on the forced-zero bit range and ht_shift derivation *(Info)*
 
-**Location:** `src/SPHINCs-C13Asm.sol:76`; `signer-wasm/src/sphincs.rs:16`.
+**Location:** `src/SPHINCs-C13Asm.sol:76`; `signers/signer-wasm/src/sphincs.rs:16`.
 
 **What's wrong.** The line-76 comment says the forced-zero index i=6 is "at bits 114..132", but the applied mask is `0x7FFFF` (19 bits) → checked range `[114,133)`. The code is correct (shr 114, 19-bit mask); the comment's upper bound is ambiguous/off by one against the adjacent exclusive-range convention. Separately, `sphincs.rs:16 let ht_shift = K * A; // 128` — K·A = 7·19 = **133**, not 128; the code is right, the comment is unambiguously stale.
 
@@ -375,7 +375,7 @@ No candidate findings were left in an unadjudicated state — the adversarial ve
 | Area | What to run / check | Where to look |
 |---|---|---|
 | SLH NIST/ACVP KAT conformance | Run external (and internal) ACVP/NIST known-answer vectors against the verifier. None is executed anywhere (no `.github/workflows`). The "FIPS 205 bit-exact" claim is only ever checked as signer↔verifier mutual consistency. | `signers/sphincsplus-128-24/crosscheck.py` (manual); `test/SLH-DSA-SHA2-128-24-Test.t.sol` |
-| Full-parameter C13 byte-equality (Py vs Rust vs verifier) | Run the three-way crosscheck at real C13 height (A=19, SUBTREE_H=11). A Python-signer-specific bug (count-grind or ADRS edge that only manifests at full params) would not be caught by anything that runs by default. The `cross_validate.rs` unit oracle is broken (C13-S-f1/f2). | `signers/c13-crosscheck/crosscheck.py`; `signer-wasm/tests/cross_validate.rs`, `fors_reuse_poc.rs` (`#[ignore]`d) |
+| Full-parameter C13 byte-equality (Py vs Rust vs verifier) | Run the three-way crosscheck at real C13 height (A=19, SUBTREE_H=11). A Python-signer-specific bug (count-grind or ADRS edge that only manifests at full params) would not be caught by anything that runs by default. The `cross_validate.rs` unit oracle is broken (C13-S-f1/f2). | `signers/c13-crosscheck/crosscheck.py`; `signers/signer-wasm/tests/cross_validate.rs`, `fors_reuse_poc.rs` (`#[ignore]`d) |
 | C13 Python vs Rust key-derivation chains | Confirm production always injects the account's *actual* fixed pkRoot via `sign_with_known_keys` — `signer.py main()/derive_keys` uses a *different* derivation and produces message-derived keys that will NOT match a deployed account. | `script/signer.py` (`derive_keys`, `sign_with_known_keys`) |
 | Off-chain key-handling / non-canonical key origination | Verify deploy/send scripts cannot ship a non-canonical (non-top-128) pkSeed/pkRoot to an account — which (per C13-V-f1) would silently brick it. The on-chain accounts store keys verbatim. | `legacy/script/deploy_frame_account.py`, `send_userop_c13.py`, `send_frame_tx_c13.py` |
 | SLH-DSA-Keccak twin & slhvk Vulkan signer | **Out of review scope, not examined.** No automated test guards that the Keccak verifier and its signer agree byte-for-byte at full params; the LSB-first convention is documented as intentionally incompatible with the SHA-2 BE family. | `src/SLH-DSA-keccak-128-24verifier.sol`, `signers/slhvk-sha2-128-24/` |

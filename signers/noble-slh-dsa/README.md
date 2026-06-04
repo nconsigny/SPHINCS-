@@ -16,7 +16,7 @@ external SLH-DSA verify (empty context), just at a custom parameter set — so a
 (lightly patched) noble can reproduce it bit-for-bit. **C13 cannot use noble at all**:
 it is the ePrint 2025/2203 WOTS+C / FORS+C *counter-grinding* construction over
 keccak256, which is not standard SLH-DSA. Use `script/signer.py c13` /
-`signer-wasm` for C13.
+`signers/signer-wasm` for C13.
 
 ## Parameter set (NIST SP 800-230 Table 1)
 

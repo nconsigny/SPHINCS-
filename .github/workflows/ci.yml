@@ -25,13 +25,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo build (also builds the signer-c13 CLI used by the forge FFI fast path)
-        working-directory: signer-wasm
+        working-directory: signers/signer-wasm
         run: cargo build --release
       - name: cargo test (cross_validate oracle, fors_reuse_poc, wots_reuse_poc)
-        working-directory: signer-wasm
+        working-directory: signers/signer-wasm
         run: cargo test --release
       - name: cargo test --ignored (full-param C13 sign + full-height cross-impl checks)
-        working-directory: signer-wasm
+        working-directory: signers/signer-wasm
         run: cargo test --release -- --ignored
 
   # ── Solidity verifiers + accounts. Sets up every FFI dependency so the full
@@ -50,7 +50,7 @@ jobs:
       - name: Python signer deps
         run: pip install eth-account eth-abi requests pycryptodome
       - name: Build C13 Rust signer CLI (fast path for the C13 FFI tests)
-        working-directory: signer-wasm
+        working-directory: signers/signer-wasm
         run: cargo build --release
       - name: Build SLH-DSA-SHA2 C reference signer (FIPS oracle / fast signer backend)
         run: make -C signers/sphincsplus-128-24

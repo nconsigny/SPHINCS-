@@ -20,8 +20,8 @@ reproducible.
 
 Assumes (from repo root):
   - `python3 script/signer.py c13 …` works
-  - `signer-wasm/target/release/signer-c13` is built
-    (run `cargo build --release --bin signer-c13` inside signer-wasm/)
+  - `signers/signer-wasm/target/release/signer-c13` is built
+    (run `cargo build --release --bin signer-c13` inside signers/signer-wasm/)
   - `anvil`, `forge`, `cast` are on PATH
 """
 
@@ -36,7 +36,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYSIG = REPO_ROOT / "script" / "signer.py"
-RSCLI = REPO_ROOT / "signer-wasm" / "target" / "release" / "signer-c13"
+RSCLI = REPO_ROOT / "signers/signer-wasm" / "target" / "release" / "signer-c13"
 VERIFIER_SRC = "src/SPHINCs-C13Asm.sol:SphincsC13Asm"
 
 ANVIL_RPC = "http://127.0.0.1:8545"
@@ -62,7 +62,7 @@ def check_prereqs():
     require(PYSIG.exists(), f"Python signer missing: {PYSIG}")
     require(RSCLI.exists(),
         f"Rust CLI missing at {RSCLI}\n"
-        f"Build it: (cd signer-wasm && cargo build --release --bin signer-c13)")
+        f"Build it: (cd signers/signer-wasm && cargo build --release --bin signer-c13)")
 
 
 def decode_abi(hex_payload: str) -> tuple[bytes, bytes, bytes]:

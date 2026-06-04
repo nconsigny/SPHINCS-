@@ -31,7 +31,7 @@ from eth_account import Account
 from eth_abi import encode
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUST_CLI = REPO_ROOT / "signer-wasm" / "target" / "release" / "signer-c13"
+RUST_CLI = REPO_ROOT / "signers/signer-wasm" / "target" / "release" / "signer-c13"
 ADDRS_JSON = REPO_ROOT / "script" / ".c13_addresses.json"
 
 ENTRYPOINT_V09 = "0x433709009B8330FDa32311DF1C2AFA402eD8D009"

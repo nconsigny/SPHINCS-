@@ -23,7 +23,7 @@ Accounts present in this repo use the C-series: `SphincsAccount` (ERC-4337), `Sp
 ```bash
 forge build                                             # compile all contracts
 forge test                                              # run all forge tests
-cd signer-wasm && cargo test --release -- --ignored     # Rust C-series signer (9/9)
+cd signers/signer-wasm && cargo test --release -- --ignored     # Rust C-series signer (9/9)
 
 # SLH-DSA-128-24 fast C signers (one-time build; ~11 min per NIST-params sign).
 # The binaries are gitignored, so a fresh checkout has none and a stale checkout
@@ -98,7 +98,7 @@ Retired layout (`legacy/`, frozen — not maintained):
 
 JARDIN's structural divergence from FIPS uncompressed is a shorter tree field (8 B vs 12 B) and a 4th type-dependent word (`ha`) that is never actually populated by any type. The visible difference between layouts is that JARDIN's `ci` (chain_index, WOTS-only) and `cp`/`ha` (height/index, TREE-only) live at distinct byte positions; FIPS overloads `word2` and `word3` per type. Both layouts are sound; FIPS is the cross-impl interop choice.
 
-**New keccak-family verifiers MUST use FIPS uncompressed** — JARDIN is a frozen legacy layout, not an option for new work. The JARDIN-aware signers in `script/signer.py` (`cfg["adrs_mode"]` defaulting to JARDIN) still drive the legacy C6/C8/C10 paths (`c10` stays JARDIN for `legacy/src/`; the promoted twin is `c10-fips`); live C7/C9/C10/C11/C13 set `cfg["adrs_mode"]="fips"`, and `signer-wasm` is C13-only. The plain-SPX C12 FIPS signer is `script/spx_fips_signer.py` (wraps the shared `jardin_spx_signer.py`). Only touch JARDIN ADRS code to keep a `legacy/` verifier reproducible.
+**New keccak-family verifiers MUST use FIPS uncompressed** — JARDIN is a frozen legacy layout, not an option for new work. The JARDIN-aware signers in `script/signer.py` (`cfg["adrs_mode"]` defaulting to JARDIN) still drive the legacy C6/C8/C10 paths (`c10` stays JARDIN for `legacy/src/`; the promoted twin is `c10-fips`); live C7/C9/C10/C11/C13 set `cfg["adrs_mode"]="fips"`, and `signers/signer-wasm` is C13-only. The plain-SPX C12 FIPS signer is `script/spx_fips_signer.py` (wraps the shared `jardin_spx_signer.py`). Only touch JARDIN ADRS code to keep a `legacy/` verifier reproducible.
 
 ### Shared hash kernel (legacy phrasing, kept for context)
 
@@ -184,7 +184,7 @@ So a desktop-class signer that holds the XMSS tree in RAM amortises keygen acros
 ### C-series signers
 
 - `script/signer.py` — Python SPHINCs- C-series signer (C6–C13 all supported; live C7/C9/C11/C13 + `c10-fips` in FIPS ADRS mode, legacy C6/C8/C10 in JARDIN mode; slow, ~30 s per C6 sig). **SHA-256 twins** `c10-sha` / `c11-sha` / `c13-sha` are gated by `cfg["hash"]="sha2"` + `adrs_mode="adrsc"` + `parse="msb"`; **BLAKE2b twins** `c11-blake` / `c13-blake` by `cfg["hash"]="blake2"` + `adrs_mode="fips"` (default LSB parse). The keccak path is byte-identical when no `hash` flag is set. A `verify_c_series` mirror self-checks every signature (all three backends) before output. **Backend dispatch must be total:** all tweakable-hash helpers — `th`/`th_pair`/`th_multi`/`wots_digest`/`h_msg` *and* the FIPS chain hash `chain_hash_fips` — route through the `HASH_BACKEND` switch. (`chain_hash_fips` previously hardcoded keccak, which the `verify_c_series` self-check could not catch — both Python sides shared the bug — but diverged from the BLAKE2b verifier. For keccak, `th()` ≡ the old `_keccak_3x32 & N_MASK`, so that fix is behavior-preserving for C7/C9/C11/C13.)
-- `signer-wasm/` — Rust/WASM C-series signer with BIP-39/44 key derivation
+- `signers/signer-wasm/` — Rust/WASM C-series signer with BIP-39/44 key derivation
 
 ### C12 (plain SPHINCS+) signer
 
@@ -199,7 +199,7 @@ So a desktop-class signer that holds the XMSS tree in RAM amortises keygen acros
 - `signers/sphincsplus-128-24/` — fork of sphincs/sphincsplus ref with a `params-*-128-24.h` header and w=4 support. ~11 min for a full NIST-params sign in pure C.
 - `signers/jardin-keccak-128-24/` — separate C fork for the Keccak variant. Adds a ~70 LOC minimal keccak256 (legacy 0x01 padding, Ethereum-flavour), a 32-byte JARDIN ADRS `address.c`, bit-level LSB-first digest-to-indices, and LSB-first-within-128-bit WOTS `base_w`.
 - `script/slh_dsa_sha2_128_24_fast_signer.py`, `script/slh_dsa_keccak_128_24_fast_signer.py` — Python wrappers that derive seeds via JARDIN HMAC-SHA-512, invoke the C binary, cache the result on disk. Used by the Forge FFI tests.
-- `signers/noble-slh-dsa/` — independent pure-JS signer for the SHA-2 variant, backed by [`@noble/post-quantum`](https://github.com/paulmillr/noble-post-quantum). The SHA-2-128-24 verifier is a FIPS 205 *external* SLH-DSA verify at a custom set, so a 6-edit-patched noble engine (`patch-noble.mjs`: export `gen`/`SHA256_SIMPLE`, generalize Winternitz `w`, widen the key-pair-address field for h'=22) reproduces it. Validated **byte-for-byte** against the C reference (reduced-param `crosscheck.mjs`) and the pinned on-chain KAT (`kat-check.mjs`); CI job `noble-crosscheck`. Drop-in for the fast signer: `node slh_dsa_sha2_128_24_signer.mjs <master_sk_hex> <message_hex> [sig_counter]`. **noble cannot sign C13** — WOTS+C/FORS+C counter-grinding over keccak256 is not standard SLH-DSA; use `script/signer.py c13` / `signer-wasm`.
+- `signers/noble-slh-dsa/` — independent pure-JS signer for the SHA-2 variant, backed by [`@noble/post-quantum`](https://github.com/paulmillr/noble-post-quantum). The SHA-2-128-24 verifier is a FIPS 205 *external* SLH-DSA verify at a custom set, so a 6-edit-patched noble engine (`patch-noble.mjs`: export `gen`/`SHA256_SIMPLE`, generalize Winternitz `w`, widen the key-pair-address field for h'=22) reproduces it. Validated **byte-for-byte** against the C reference (reduced-param `crosscheck.mjs`) and the pinned on-chain KAT (`kat-check.mjs`); CI job `noble-crosscheck`. Drop-in for the fast signer: `node slh_dsa_sha2_128_24_signer.mjs <master_sk_hex> <message_hex> [sig_counter]`. **noble cannot sign C13** — WOTS+C/FORS+C counter-grinding over keccak256 is not standard SLH-DSA; use `script/signer.py c13` / `signers/signer-wasm`.
 - `signers/*/crosscheck.py` — Python-vs-C cross-validation at arbitrary h/a.
 
 ### Deploy scripts

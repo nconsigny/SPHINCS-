@@ -800,7 +800,7 @@ def compute_octopus_auth_set(tree_nodes, sorted_indices, tree_height):
 # offline-search (message, R) to steer the FORS index map / hypertree leaf onto
 # previously-revealed instances), restoring the standard secret-randomizer
 # few-time model, while staying deterministic per (key, message). The preimage
-# layout MUST match signer-wasm/src/fors.rs::grind_r byte-for-byte or the
+# layout MUST match signers/signer-wasm/src/fors.rs::grind_r byte-for-byte or the
 # Rust<->Python cross-check (and the on-chain digest) diverge. The verifier is
 # unaffected — it only reads R out of the signature.
 def grind_R_fors(seed, sk_seed, root, message, k, a, cfg=None):
