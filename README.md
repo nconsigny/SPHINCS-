@@ -5,10 +5,9 @@
 > ## WARNING: RESEARCH PROTOTYPE - NOT FOR PRODUCTION USE
 >
 > This codebase is a scheme exploration for lightweight variants of SPHINCS+ (called SPHINCs-).
-> It has **not been audited**, contains **no security guarantees**, and is
+> It has **not been audited yet**, and is
 > **not safe to use with real funds**. Cryptographic parameters, key derivation,
-> and contract logic have not been reviewed by any third party.
-> **Use on testnets only.**
+> and contract logic have not been reviewed.
 
 ---
 **Welcome to SPHINCs-**, a family of EVM-optimised variants of SLH-DSA and the recently proposed [SLH-DSA-SHA2-128-24](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-230.ipd.pdf). They all achieve low gas cost for pure on-chain signature verification without any precompile which makes them useful today without any ethereum hardfork. The key modifications is substituting SHAKE256 with the native keccak256 opcode and a significant reduction of the signature budget. NIST initially standardized a scheme with a 2^64 signature budget which is a huge number. Ethereum's on chain data shows that among 64,294,251 Ethereum mainnet addresses that sent at least one transaction in 2025 99.99% had less than 3000 transactions annually. The variants described in the repo give a trade-off between signing budget per key pair, verifier cost in gas and signer keygen and signing keccak calls (hardware wallet friendliness).
