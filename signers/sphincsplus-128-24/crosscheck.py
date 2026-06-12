@@ -8,6 +8,11 @@ Both signers must produce the SAME pk_seed, pk_root, and signature bytes
 when fed identical inputs (seed, message, optrand).  If they diverge we
 know one side has a bug.
 
+The message is wrapped in the FIPS 205 EXTERNAL empty-context envelope
+M' = 0x00 || 0x00 || M before signing on BOTH sides, matching what the fast
+signers and the on-chain verifier sign (review SLH-X-f1).  Pass --raw to
+compare on the unwrapped bytes instead.
+
 Assumes this script runs from the repo root.
 
 Usage:
@@ -87,6 +92,9 @@ def main():
     p.add_argument("optrand_hex")
     p.add_argument("--h", type=int, default=22)
     p.add_argument("--a", type=int, default=24)
+    p.add_argument("--raw", action="store_true",
+                   help="compare on the raw message bytes (skip the FIPS 205 "
+                        "external empty-context envelope)")
     args = p.parse_args()
 
     seed = bytes.fromhex(args.seed_hex.removeprefix("0x"))
@@ -94,11 +102,19 @@ def main():
     optrand = bytes.fromhex(args.optrand_hex.removeprefix("0x"))
     assert len(seed) == 48 and len(optrand) == 16
 
+    # Sign what production signs: the fast signers and the on-chain verifier
+    # operate on M' = 0x00 || 0x00 || M (external SLH-DSA, empty context).
+    if not args.raw:
+        msg = b"\x00\x00" + msg
+        print("  message wrapped in external empty-ctx envelope "
+              f"(M' = 0x0000 || M, {len(msg)} bytes)")
+    msg_hex_signed = msg.hex()
+
     sk_seed, sk_prf, pk_seed = seed[:16], seed[16:32], seed[32:48]
 
     print(f"  C signer ({args.h=}, {args.a=})...")
     c_pk_seed, c_pk_root, c_sig = run_c_signer(
-        args.seed_hex, args.msg_hex, args.optrand_hex)
+        args.seed_hex, msg_hex_signed, args.optrand_hex)
     print(f"    pk_seed = 0x{c_pk_seed.hex()}")
     print(f"    pk_root = 0x{c_pk_root.hex()}")
     print(f"    sig     = {len(c_sig)} bytes, first 16 = 0x{c_sig[:16].hex()}")

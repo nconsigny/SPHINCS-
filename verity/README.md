@@ -1,115 +1,104 @@
-# Formally Checked Merkle Acceptance Kernel
+# Formal Verification (Verity / Lean 4)
 
-This directory contains a small Verity artifact for SPHINCS-style witnesses.
+This directory contains a small Verity workbench that hand-models two of the
+production verifiers in `src/` and proves that each model refines a
+functional spec. The workbench is not a build artefact for the production
+contracts and is not exercised by Foundry.
 
-The public claim is narrow and strong:
+## Scope
 
-- a typed witness reconstructs exactly one root,
-- `verifyPath` returns `true` iff that reconstructed root equals the stored root,
-- `verifyPackedPath` returns `true` iff the packed input is canonical, decodes to a typed witness, and that typed witness is accepted by the same root-equality rule,
-- both verification entrypoints are read-only.
+The Verity models cover only:
 
-Malformed packed encodings fail in one simple, explicit way: any direction word with non-zero bits above the low 4 bits is rejected.
+- `src/SPHINCs-C13Asm.sol` (keccak; the main production verifier).
+- `src/SLH-DSA-SHA2-128-24verifier.sol` (FIPS 205 external SLH-DSA, empty
+  context, SHA-256 precompile).
 
-This kernel does not prove full SPHINCS cryptography or the production C6 verifier. It proves the on-chain Merkle acceptance boundary.
+The other live production verifiers, `src/SPHINCs-C7Asm.sol` and
+`src/SPHINCs-C9Asm.sol`, are **not** modeled and **not** verified here. They
+should be treated as unverified code.
 
-## Proof Boundary
+The C12 Verity model has been removed: C12 lives in `legacy/` and is no
+longer a production verifier. The old `SphincsC6/`, `SphincsC6Full/`,
+`SphincsC6V/`, and `SphincsKernel/` work, the `verity/artifacts/` Yul
+artefacts, and `test/MerkleKernelVerityTest.t.sol` have been removed from
+this tree.
 
-The verified artifact is [`SphincsKernel/`](./SphincsKernel/).
+## What the models are, and what they are not
 
-It stores one expected root and exposes two read-only acceptance APIs:
+The models in `SphincsMinusVerifiers/Model.lean` are hand-transcribed from
+the Solidity inline assembly. They mirror the handwritten assembly
+structure (stacks, memory, and Yul revert fragments) and use Verity's
+ABI-aware `Bytes` parameter locals (`sig.length`, `sig.offset`).
 
-- `verifyPath`: takes a fully decoded witness with 4 explicit direction booleans.
-- `verifyPackedPath`: takes the same witness with the directions packed into the low 4 bits of one word, and rejects non-canonical encodings.
+- The models are **not** compiled into the production contracts.
+- The models are **not** deployed.
+- The models are **not** replayed in the Foundry test suite. There is no
+  EVM-side regression test that takes the Lean model and runs it against
+  the on-chain verifier.
+- The proof target is model-to-byte-spec correspondence inside Lean.
+  Correspondence between the model and the deployed code rests on the
+  transcription itself being reviewed against the assembly.
 
-Exact on-chain guarantee:
-
-- `previewPath` and `previewPackedPath` reconstruct exactly the root defined by the Lean model.
-- `verifyPath` returns `true` if and only if the reconstructed root equals the stored root.
-- `verifyPackedPath` returns `true` if and only if the packed input is canonical and the decoded witness is accepted by the same typed acceptance rule.
-- Both verification entrypoints preserve storage.
-- "Read-only" here is a semantic guarantee proved against the deployed contract behavior; this branch does not make a separate ABI-mutability claim.
-- The contract is compiled with `--deny-local-obligations` and `--deny-axiomatized-primitives`.
-
-Outside the proof boundary:
-
-- the toy `compress` function is not claimed to be cryptographically secure,
-- the full `SphincsC6/` verifier is not claimed here,
-- witness derivation, signature parsing, and integration logic live outside this verified kernel.
-
-What is proved:
-
-- Lean proves the acceptance rule.
-- Lean also proves the packed/decode boundary: malformed encodings are rejected, and canonical encodings are accepted exactly when their decoded typed witness is accepted.
-- Verity proves the compiled EVM contract implements that rule.
+The C13 model includes the public-key canonicality guard from the
+Solidity: `pkSeed` and `pkRoot` must each equal themselves masked by
+`N_MASK`, otherwise the verifier reverts with `Invalid public key`. The
+SHA-2 model has the same public-key guard.
 
 ## File map
 
-- `SphincsKernel/Model.lean`: typed witness model, packed witness decoding, and acceptance rule.
-- `SphincsKernel/MerkleKernel.lean`: Verity contract for the on-chain entrypoints.
-- `SphincsKernel/Spec.lean`: exact function-level specs.
-- `SphincsKernel/Proofs/Correctness.lean`: user-facing theorems such as typed-witness acceptance and packed-decoding acceptance.
-- `SphincsKernel/Examples.lean`: named examples for a concrete witness.
+- `SphincsMinusVerifierSpec/Spec.lean`: the byte-level contract spec
+  (`ByteLevel.verifyBytes`) and the abstract algorithmic spec
+  (`verifyParsed`, `verifySpec`). The byte spec refines the algorithmic
+  spec unconditionally: `verifyBytes_eq_verifySpec` and
+  `byteVerifier_refines_spec` are proved with no assumptions beyond
+  `propext`.
+- `SphincsMinusVerifierSpec/C13Concrete.lean` and `C13Mirror.lean` (plus
+  the matching `Axioms` files): the hand-coded `Primitives` instances and
+  concrete FORS / hypertree arithmetic that the algorithmic spec is
+  checked against.
+- `SphincsMinusVerifiers/Model.lean`: the hand-transcribed Verity models
+  for the C13 keccak verifier and the SLH-DSA-SHA2-128-24 verifier.
+- `SphincsMinusVerifiers/Proofs.lean`: the per-verifier refinement
+  surface, with `c13_refines_spec` and
+  `slhDsaSha2_128_24_refines_spec` as the top-level theorems.
+- `SphincsMinusVerifiers/AXIOMS.md`: the full trust surface (every
+  named bridge axiom, opaque primitive, and residual assembly axiom).
 
-## Main properties
+## Proof state
 
-The core statements are:
+- `c13_refines_spec` is currently proved in Lean and rests on Lean's
+  logic plus three named residual assembly axioms, all enumerated in
+  `SphincsMinusVerifiers/AXIOMS.md`. The keccak hashing in the C13
+  model is concrete (the interpreter's own pure Keccak), so no opaque
+  primitive axiom remains on the C13 side. A follow-up PR is
+  discharging the residual assembly axioms; once it lands,
+  `c13_refines_spec` will rest on Lean's logic alone.
+- `slhDsaSha2_128_24_refines_spec` is proved in Lean but additionally
+  keeps a named bridge axiom for byte-addressed memory modeling (the
+  SHA-256 precompile path uses overlapping sub-word `mstore`s that the
+  current word-keyed interpreter does not represent) and an opaque
+  SHA-256 primitives constant.
 
-- A witness is accepted exactly when it reconstructs the configured root.
-- A packed witness is accepted exactly when its encoding is canonical and its decoded witness is accepted by the typed rule.
-- Verification is read-only.
-- If you configure the contract with the root reconstructed from a witness, that witness will verify.
+This README is worded so the scope above stays true in both proof states:
+as of today, and after the residual assembly obligations are discharged.
+The exhaustive list of named assumptions is in
+`SphincsMinusVerifiers/AXIOMS.md`.
 
-Implementation shape:
-
-- The contract now factors the kernel through a tiny internal helper chain: one Merkle step helper, one direction-bit decoder, and one root-reconstruction helper.
-- The public entrypoints are just read-only wrappers around that shared contract-local kernel plus the explicit canonical-encoding check for packed witnesses.
-- The shared Lean semantic core remains the proof reference: the specs and correctness theorems tie the deployed entrypoints back to the same typed witness model exactly.
-
-That gives a small, inspectable, replayable kernel with one sharp claim instead of a broader but blurrier SPHINCS story.
-
-## Build and strict checks
+## Build
 
 ```bash
 cd verity
-lake update
-lake build
-
-# Strict Verity compilation of the recommended kernel
-lake exe verity-compiler \
-  --module SphincsKernel.MerkleKernel \
-  --deny-local-obligations \
-  --deny-axiomatized-primitives \
-  --output artifacts/sphincs-kernel
+./scripts/build.sh
 ```
 
-## EVM replay tests
+Always use `verity/scripts/build.sh`, not a bare `lake build`. The
+proof modules here are large (a single Lean worker on `Proofs.lean` can
+peak at several GB), and a bare `lake build` schedules one worker per
+core, which OOMs on machines with 16 to 32 GB of RAM. The script caps
+the Lean task pool at 2 workers via `LEAN_NUM_THREADS`; `lakefile.lean`
+sets `maxHeartbeats 1000000` so a runaway `whnf` aborts as an error
+instead of OOMing the machine. Several proof files were authored on
+large cloud machines and exceed 12 GB per worker if a defeq diverges.
 
-The Yul artifact is not just generated; it is exercised directly in Foundry.
-
-```bash
-# From the repo root
-forge test --match-contract MerkleKernelVerityTest -vv
-```
-
-That test:
-
-- recompiles `verity/artifacts/sphincs-kernel/MerkleKernel.yul` into deployable bytecode,
-- deploys the raw Verity artifact,
-- checks named example vectors for both explicit and packed witnesses,
-- fuzzes `previewPath` against a tiny Solidity reference model,
-- fuzzes `previewPackedPath` against a reference packed-decoding model,
-- fuzzes `verifyPath` to show acceptance iff `candidateRoot == storedRoot`,
-- fuzzes `verifyPackedPath` to show acceptance iff the packed input is canonical and the decoded witness is accepted by the typed rule,
-- checks that verification preserves storage.
-
-## Why this is useful for SPHINCS-
-
-For a real SPHINCS deployment, this suggests the better split:
-
-1. Parse and derive a typed witness outside the verified core.
-2. Keep the heavy cryptographic logic as a reference model and test oracle.
-3. Hand only the Merkle acceptance step to the verified kernel.
-4. State guarantees exactly at that boundary, not beyond it.
-
-That gives users something they can actually reason about: what exact witness shape is accepted on-chain, and what exact property the contract enforces.
+Do **not** run `lake build` or `lean` directly on hosts with less than
+64 GB of RAM. Use the script; do not bypass it.

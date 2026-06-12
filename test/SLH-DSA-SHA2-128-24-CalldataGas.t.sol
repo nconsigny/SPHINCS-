@@ -20,7 +20,7 @@ contract SLH_DSA_SHA2_128_24_CalldataGas is Test {
     function setUp() public {
         verifier = new SLH_DSA_SHA2_128_24_Verifier();
         string[] memory inputs = new string[](4);
-        inputs[0] = ".venv/bin/python";
+        inputs[0] = "python3";  // every other FFI test uses the ambient python3 (CI has no .venv)
         inputs[1] = "script/slh_dsa_sha2_128_24_fast_signer.py";
         inputs[2] = vm.toString(SK);
         inputs[3] = vm.toString(MSG);

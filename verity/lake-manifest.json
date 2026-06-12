@@ -108,5 +108,5 @@
    "inputRev": "main",
    "inherited": true,
    "configFile": "lakefile.toml"}],
- "name": "SphincsC6Verity",
+ "name": "SphincsVerity",
  "lakeDir": ".lake"}

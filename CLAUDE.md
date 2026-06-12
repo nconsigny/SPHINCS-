@@ -164,7 +164,43 @@ BIP-39 mnemonic → HMAC-SHA512("sphincs-c6-v1", seed) → SPHINCs- keys (quantu
 
 ## Formal Verification (`verity/`)
 
-Lean 4 model via Verity framework: 3 axioms (keccak CR), 20 theorems, 0 sorry. `verity_contract` macro version has Layer 1-2-3 compilation correctness proofs. See `verity/README.md` for proof inventory.
+The `verity/` directory is a small Verity workbench that hand-models two
+of the production verifiers in `src/` and proves each model refines a
+functional spec. See `verity/README.md` for scope, file map, and build
+instructions, and `verity/SphincsMinusVerifiers/AXIOMS.md` for the full
+remaining trust surface.
+
+The `SphincsMinusVerifiers` workbench (`verity/SphincsMinusVerifiers/`)
+layers the refinement as: hand-transcribed Verity model →
+`ByteLevel.verifyBytes` (byte-level contract spec) → `verifySpec`
+(abstract algorithmic spec). The lower-to-abstract link
+(`verifyBytes_eq_verifySpec`, `byteVerifier_refines_spec`) is fully
+proved (`#print axioms` -> `propext`). The per-verifier theorems
+`c13_refines_spec` and `slhDsaSha2_128_24_refines_spec` are proved in
+`Proofs.lean`. `c13_refines_spec` rests on Lean's logic plus three named
+residual assembly axioms; `slhDsaSha2_128_24_refines_spec` rests on
+Lean's logic plus its model-to-byte-spec bridge axiom and an opaque
+SHA-256 primitives constant. All are enumerated in
+`SphincsMinusVerifiers/AXIOMS.md`. A follow-up PR is discharging the
+residual assembly obligations; the README is worded so it stays true in
+both proof states.
+
+The Verity models are hand-transcribed from the Solidity inline
+assembly. They are not compiled into the production contracts, not
+deployed, and not replayed in the Foundry test suite. There is no
+EVM-side regression test that takes the Lean model and runs it against
+the on-chain verifier; correspondence rests on the transcription itself
+being reviewed against the assembly. The old `SphincsC6/`, `SphincsC6Full/`,
+`SphincsC6V/`, and `SphincsKernel/` trees, the C12 model, the
+`verity/artifacts/` Yul artefacts, and `test/MerkleKernelVerityTest.t.sol`
+have been removed; no Verity artifact is exercised by Foundry.
+
+**Build discipline (16 GB machines):** never run a bare `lake build`. Use
+`verity/scripts/build.sh` (caps the Lean task pool at 2 workers via
+`LEAN_NUM_THREADS`; `lakefile.lean` sets `maxHeartbeats 1000000` so a
+runaway whnf aborts as an error instead of OOMing the machine). Several
+proof files were authored on large cloud machines and exceed 12 GB per
+worker if a defeq diverges.
 
 ## Foundry Config
 

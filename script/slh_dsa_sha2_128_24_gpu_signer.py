@@ -57,6 +57,9 @@ def _norm(s: str) -> str: return s.lower().removeprefix("0x")
 
 def cache_key(master_sk_hex: str, message_hex: str, sig_counter: int) -> str:
     # Convention tag invalidates pre-envelope fixtures (review SLH-X-f1).
+    # Like the CPU fast signer, also fold in the GPU binary's mtime so a
+    # rebuild (e.g. a reduced-height dev build) cannot silently serve a
+    # stale fixture under the same tag.
     h = hashlib.sha256()
     h.update(b"fips205-external-empty-ctx-v2|")
     h.update(_norm(master_sk_hex).encode())
@@ -64,6 +67,8 @@ def cache_key(master_sk_hex: str, message_hex: str, sig_counter: int) -> str:
     h.update(_norm(message_hex).encode())
     h.update(b"|")
     h.update(str(sig_counter).encode())
+    h.update(b"|")
+    h.update(str(os.path.getmtime(BIN_PATH)).encode())
     return h.hexdigest()
 
 def main():

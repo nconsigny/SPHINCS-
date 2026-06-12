@@ -30,16 +30,16 @@ There are different ways to construct the SPHINCS signature scheme. Existing lit
 | **SLH-DSA-SHA2-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~142 K | - | - | 128 | 128 | 128 | 128 |
 | **SLH-DSA-Keccak-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~94 K | - | - | 128 | 128 | 128 | 128 |
 
-- **Family**: the SPHINCS+ construction style (vanilla SPHINCs+ SPX, WOTS +). WOTS+C / FORS+C is the C-series compact construction with counter-grinding (ePrint 2025/2203). Plain SLH-DSA / SPHINCS+ is the standard FIPS 205 construction with no counter grinding — C12 and the two SLH-DSA-128-24 entries are the same algorithm at different parameter sets, with the SHA-2 row using the FIPS 22-byte ADRSc + SHA-256 hash.
-- **sign_h**: hash-function calls during keygen + one signature, zero-memory signer (no inter-sign caching — the relevant case for a hardware wallet). A high number means a lot of work for the hardware. C12 the lightest is ~40 sec to sign on secure element. 
+- **Family**: the SPHINCS+ construction style (vanilla SPHINCs+ SPX, WOTS +). WOTS+C / FORS+C is the C-series compact construction with counter-grinding (ePrint 2025/2203). Plain SLH-DSA / SPHINCS+ is the standard FIPS 205 construction with no counter grinding: C12 and the two SLH-DSA-128-24 entries are the same algorithm at different parameter sets, with the SHA-2 row using the FIPS 22-byte ADRSc + SHA-256 hash.
+- **sign_h**: hash-function calls during keygen + one signature, zero-memory signer (no inter-sign caching, the relevant case for a hardware wallet). A high number means a lot of work for the hardware. C12 the lightest is ~40 sec to sign on secure element. 
 - **swn**: small-Winternitz-number counter bits used by the WOTS+C / FORS+C grinding. Plain SPX and SLH-DSA don't counter-grind.
-- **sec_N**: security bits at 2^N signatures per key. For SLH-DSA-*-128-24 (h=22, d=1) the hypertree is a **single XMSS tree of only 2²² WOTS leaves**, and the signing leaf is chosen *pseudorandomly* from the message digest — so WOTS-leaf collisions appear by the birthday bound (onset ~2¹¹ signatures), well before the named 2²⁴ usage cap. This is expected and **absorbed by the FORS few-time layer** (it is not a WOTS forgery); 128-bit security is carried with the FORS margin, *not* by one-time WOTS use. The "2²⁴" figure is therefore a recommended per-key **usage cap**, not a flat one-time-security guarantee. See [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md) for the budget/collision accounting. (review SLH-X-f2cap)
+- **sec_N**: security bits at 2^N signatures per key. For SLH-DSA-*-128-24 (h=22, d=1) the hypertree is a **single XMSS tree of only 2²² WOTS leaves**, and the signing leaf is chosen *pseudorandomly* from the message digest, so WOTS-leaf collisions appear by the birthday bound (onset ~2¹¹ signatures), well before the named 2²⁴ usage cap. This is expected and **absorbed by the FORS few-time layer** (it is not a WOTS forgery); 128-bit security is carried with the FORS margin, *not* by one-time WOTS use. The "2²⁴" figure is therefore a recommended per-key **usage cap**, not a flat one-time-security guarantee. See [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md) for the budget/collision accounting. (review SLH-X-f2cap)
 - **Verify (pure)**: Foundry `gasleft()` measurement of the assembly block.
 - **Frame**: total EIP-8141 frame-tx gas (ethrex). C12 / SLH-DSA-128-24 are not yet wired to frame accounts in this repo.
 - **4337**: total ERC-4337 `handleOps` tx gas (Sepolia). The 4337 wiring for C7 / C11 lives in `SphincsAccount` + `SphincsAccountFactory`; no SLH-DSA or C12 account exists here yet.
-- **†**: C13 uses the **FIPS 205 §11.2.2 uncompressed 32-byte ADRS layout** with keccak256, not JARDIN's. First verifier on the FIPS address layout — see the *Address layout* subsection below.
+- **†**: C13 uses the **FIPS 205 §11.2.2 uncompressed 32-byte ADRS layout** with keccak256, not JARDIN's. First verifier on the FIPS address layout (see the *Address layout* subsection below).
 
-### C13 vs the rest of the family — what changes
+### C13 vs the rest of the family: what changes
 
 C13's parameter choice (`h=22 d=2 a=19 k=7 w=8`) was built around three goals: smallest signature, cheapest verify at full 128-bit security across the signature-count window, FIPS-aligned address layout. The numbers above bear out the design:
 
@@ -47,14 +47,14 @@ C13's parameter choice (`h=22 d=2 a=19 k=7 w=8`) was built around three goals: s
 |--------------------------------|---------|---------|---------|---------|---------------------|-----------------------|
 | Sig size                       | 3,704 B | 3,976 B | **3,688 B** ← smallest | 6,512 B | 3,856 B | 3,856 B |
 | Pure-asm verify                | 127 K   | 116 K   | **105 K** ← cheapest at sec_20=128 | 276 K | 142 K | 94 K |
-| Frame tx total (ethrex)        | 210 K   | 202 K   | **188 K** | — | — | — |
-| 4337 handleOps total (Sepolia) | 318 K   | 308 K   | **293 K** | — | — | — |
+| Frame tx total (ethrex)        | 210 K   | 202 K   | **188 K** | n/a | n/a | n/a |
+| 4337 handleOps total (Sepolia) | 318 K   | 308 K   | **293 K** | n/a | n/a | n/a |
 | Signature-count cap            | 2²⁴     | 2¹⁶     | 2²²     | 2²⁰ (h=20, d=5) | 2²⁴ ‡ | 2²⁴ ‡ |
 | Security at the cap            | 128 bit | 86 bit  | **128 bit** | 95 bit | 128 bit § | 128 bit § |
 | Hash-call cost / sign (cold)   | 4.3 M   | 292 K   | ~10 M   | 36.6 K | ~1.07 B | ~1.07 B |
 | ADRS layout                    | **FIPS uncompressed** | JARDIN  | **FIPS uncompressed** | JARDIN | FIPS ADRSc | JARDIN |
 
-‡ **SLH-DSA-*-128-24 cap is a usage cap, not a leaf budget.** h=22, d=1 ⇒ a single XMSS tree of 2²² WOTS leaves; the leaf is chosen pseudorandomly per message, so by 2²⁴ signatures leaves have been reused ~4× on average (and birthday collisions begin ~2¹¹). Unlike C7/C13 — whose 2²⁴/2²² figures are the actual hypertree-leaf counts at full one-time-WOTS security — the SLH "2²⁴" exceeds its 2²² leaf space by design.
+‡ **SLH-DSA-*-128-24 cap is a usage cap, not a leaf budget.** h=22, d=1 ⇒ a single XMSS tree of 2²² WOTS leaves; the leaf is chosen pseudorandomly per message, so by 2²⁴ signatures leaves have been reused ~4× on average (and birthday collisions begin ~2¹¹). Unlike C7/C13, whose 2²⁴/2²² figures are the actual hypertree-leaf counts at full one-time-WOTS security, the SLH "2²⁴" exceeds its 2²² leaf space by design.
 
 § **128 bit at the cap is carried by FORS, not by WOTS one-time-ness.** Pseudorandom leaf reuse is expected and absorbed by the FORS few-time layer (a=24, k=6); a leaf collision is not itself a forgery. See [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md). (review SLH-X-f2cap)
 
@@ -68,13 +68,13 @@ Reading the table:
 
 The takeaway: **C13 is the cheapest verifier in the repo at 128-bit security up to a 2²² sig cap**, and the smallest signature. The cost is sign-time, which is ~30× C11 and ~2× C7. For an Ethereum smart account that signs occasionally and is verified by everyone, that asymmetry is the right shape.
 
-C11 and C12 are light enough to run on a hardware wallet, 390s and 47.5s signature times on a ST33K1M5 secure element (Ledger nano S+). C12 has the lowest hardware signer cost of all (36 K hashes - plain SPX with d=5 hypertree skips most tree-hash work) at the price of a 6,512-byte sig. SLH-DSA-SHA2-128-24 is the FIPS-aligned alternative: much larger signer cost even on a desktop-class signer that caches the XMSS tree (~200 M hashes / sig, dominated by FORS — which can't be cached because the leaf-index to FORS-tree-address mapping changes with every message), and ~1.07 B / sig on a zero-memory signer that has to rebuild the 2²²-leaf XMSS for every auth path. 128-bit security across the 2²⁴ usage window is carried by the FORS few-time layer absorbing the expected pseudorandom WOTS-leaf reuse over the 2²² leaf space (‡/§ above; [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md)), not by one-time WOTS use. The SHA-2 verifier implements **FIPS 205 *external* SLH-DSA.Verify with an empty context** (M wrapped as `0x00‖0x00‖M` before H_msg), so it matches published NIST/ACVP external KAT vectors. The Keccak twin trades bit-exact NIST compliance for ~34 % cheaper on-chain verification (but not a very interesting trade-off as it keeps the same signer cost).
+C11 and C12 are light enough to run on a hardware wallet, 390s and 47.5s signature times on a ST33K1M5 secure element (Ledger nano S+). C12 has the lowest hardware signer cost of all (36 K hashes - plain SPX with d=5 hypertree skips most tree-hash work) at the price of a 6,512-byte sig. SLH-DSA-SHA2-128-24 is the FIPS-aligned alternative: much larger signer cost even on a desktop-class signer that caches the XMSS tree (~200 M hashes / sig, dominated by FORS, which can't be cached because the leaf-index to FORS-tree-address mapping changes with every message), and ~1.07 B / sig on a zero-memory signer that has to rebuild the 2²²-leaf XMSS for every auth path. 128-bit security across the 2²⁴ usage window is carried by the FORS few-time layer absorbing the expected pseudorandom WOTS-leaf reuse over the 2²² leaf space (‡/§ above; [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md)), not by one-time WOTS use. The SHA-2 verifier implements **FIPS 205 *external* SLH-DSA.Verify with an empty context** (M wrapped as `0x00‖0x00‖M` before H_msg), so it matches published NIST/ACVP external KAT vectors. The Keccak twin trades bit-exact NIST compliance for ~34 % cheaper on-chain verification (but not a very interesting trade-off as it keeps the same signer cost).
 
 ## Stateless SPHINCs- Architecture
 
 ### Shared hash kernel
 
-The repo now ships **only two ADRS layouts** in `src/`, both straight out of FIPS 205 — **FIPS uncompressed 32 B for the keccak/SHAKE-family hashes** (C7, C9, C13) and **FIPS ADRSc 22 B for SHA-2** (SLH-DSA-SHA2). The keccak-family verifiers used to all share JARDIN's layout; C7/C9/C13 migrated to FIPS uncompressed, and the verifiers that stayed on JARDIN — C11, C12, and the keccak SLH-DSA twin — were **retired to `legacy/`** rather than migrated. The JARDIN row below is kept for historical reference; those contracts are frozen, not part of the default build.
+The repo now ships **only two ADRS layouts** in `src/`, both straight out of FIPS 205: **FIPS uncompressed 32 B for the keccak/SHAKE-family hashes** (C7, C9, C13) and **FIPS ADRSc 22 B for SHA-2** (SLH-DSA-SHA2). The keccak-family verifiers used to all share JARDIN's layout; C7/C9/C13 migrated to FIPS uncompressed, and the verifiers that stayed on JARDIN (C11, C12, and the keccak SLH-DSA twin) were **retired to `legacy/`** rather than migrated. The JARDIN row below is kept for historical reference; those contracts are frozen, not part of the default build.
 
 | Layout | Variants | ADRS bytes | Hash | F/H/T input |
 |---|---|---|---|---|
@@ -103,13 +103,13 @@ bytes 28..32  word3 (type-dependent)
 | 3 | FORS_TREE  | key_pair_address | tree_height | tree_index |
 | 4 | FORS_ROOTS | key_pair_address | 0 | 0 |
 
-**JARDIN 32-byte ADRS** (retired to `legacy/`; was used by C11/C12/SLH-DSA-Keccak — C7/C9 migrated off it): same 32-byte width, but with an 8-byte `tree` field (FIPS gives it 12) and **four** type-dependent words (FIPS uses three). The freed-up byte budget went to `ci` (chain_index) being a dedicated WOTS-only slot, while in FIPS `chain_address` and `tree_height` share `word2` — same bytes, type-dependent meaning. JARDIN's 4th word (`ha`) is unused for every type in practice; the structural divergence from FIPS is the 8 vs 12 byte tree field.
+**JARDIN 32-byte ADRS** (retired to `legacy/`; was used by C11/C12/SLH-DSA-Keccak; C7/C9 migrated off it): same 32-byte width, but with an 8-byte `tree` field (FIPS gives it 12) and **four** type-dependent words (FIPS uses three). The freed-up byte budget went to `ci` (chain_index) being a dedicated WOTS-only slot, while in FIPS `chain_address` and `tree_height` share `word2` (same bytes, type-dependent meaning). JARDIN's 4th word (`ha`) is unused for every type in practice; the structural divergence from FIPS is the 8 vs 12 byte tree field.
 
-**Why C13 moved to FIPS uncompressed.** "Reduce differences between families": FIPS-aligning the ADRS makes the keccak verifier port cleanly from a FIPS reference implementation, and pares the repo's address-layout inventory toward just two layouts (above). The hash stays keccak256 — switching to SHA-256 would double on-chain gas (precompile staticcall vs native opcode) and would only be relevant if we needed full SLH-DSA-SHA2 family alignment, which we don't.
+**Why C13 moved to FIPS uncompressed.** "Reduce differences between families": FIPS-aligning the ADRS makes the keccak verifier port cleanly from a FIPS reference implementation, and pares the repo's address-layout inventory toward just two layouts (above). The hash stays keccak256; switching to SHA-256 would double on-chain gas (precompile staticcall vs native opcode) and would only be relevant if we needed full SLH-DSA-SHA2 family alignment, which we don't.
 
 **SLH-DSA-128-24 family**, two wire-level layouts:
-  - **SHA-2 variant** — FIPS 205 §11.2.1 hashing, **external SLH-DSA.Verify with empty context**: ADRSc (22 B), SHA-256 via precompile, message wrapped as `M' = 0x00 ‖ 0x00 ‖ M` (empty-ctx envelope), nested `Hmsg = MGF1-SHA-256(R ‖ seed ‖ SHA-256(R ‖ seed ‖ root ‖ M'), m=21)`, **big-endian (MSB-first) digest-to-indices** (`md[t] = BE(digest[3t..3t+3])` — the FIPS 205 / current PQClean convention; *not* the legacy LSB-first SPHINCS+ reference). Matches published NIST/ACVP *external* KATs; signers prepend the same `0x00 0x00`. (review SLH-X-f1)
-  - **Keccak variant** — JARDIN twin: 32-byte JARDIN ADRS (`layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4`), keccak256 primitive, F / H / T input = `seed32 ‖ adrs32 ‖ payload`, one-shot `Hmsg = keccak(seed ‖ root ‖ R ‖ msg ‖ 0xFF..FB)` (no MGF1), LSB-first digest-to-indices on the 256-bit keccak output interpreted as a single big-endian integer.
+  - **SHA-2 variant**: FIPS 205 §11.2.1 hashing, **external SLH-DSA.Verify with empty context**: ADRSc (22 B), SHA-256 via precompile, message wrapped as `M' = 0x00 ‖ 0x00 ‖ M` (empty-ctx envelope), nested `Hmsg = MGF1-SHA-256(R ‖ seed ‖ SHA-256(R ‖ seed ‖ root ‖ M'), m=21)`, **big-endian (MSB-first) digest-to-indices** (`md[t] = BE(digest[3t..3t+3])`, the FIPS 205 / current PQClean convention; *not* the legacy LSB-first SPHINCS+ reference). Matches published NIST/ACVP *external* KATs; signers prepend the same `0x00 0x00`. (review SLH-X-f1)
+  - **Keccak variant**: JARDIN twin: 32-byte JARDIN ADRS (`layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4`), keccak256 primitive, F / H / T input = `seed32 ‖ adrs32 ‖ payload`, one-shot `Hmsg = keccak(seed ‖ root ‖ R ‖ msg ‖ 0xFF..FB)` (no MGF1), LSB-first digest-to-indices on the 256-bit keccak output interpreted as a single big-endian integer.
 
 ### Shared Verifier Model
 
@@ -187,7 +187,7 @@ python3 script/slh_dsa_keccak_128_24_fast_signer.py <master_sk_hex> <message_hex
 
 EntryPoint v0.9: `0x433709009B8330FDa32311DF1C2AFA402eD8D009` (Sepolia)
 
-### 2026-06-04 redeploy — new accounts & factories
+### 2026-06-04 redeploy: new accounts & factories
 
 New C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each account funded 0.1 ETH):
 
@@ -199,7 +199,7 @@ New C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each ac
 | ethrex | SphincsAccountFactory | [`0x874f5b...`](https://explorer.eip-8141.ethrex.xyz/address/0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7) |
 | ethrex | Frame account (EIP-8141, C13) | [`0x253A4d...`](https://explorer.eip-8141.ethrex.xyz/address/0x253A4d0100fe7A2a6d6839b37BDC283FD1dF693d) |
 
-> ethrex's `SphincsAccountFactory` is deployed for completeness, but EntryPoint v0.9 has no code on ethrex — accounts created there are inert for ERC-4337; ethrex's functional PQ path is the EIP-8141 frame account. Full address record: [`script/.c13_addresses.json`](./script/.c13_addresses.json).
+> ethrex's `SphincsAccountFactory` is deployed for completeness, but EntryPoint v0.9 has no code on ethrex, so accounts created there are inert for ERC-4337. ethrex's functional PQ path is the EIP-8141 frame account. Full address record: [`script/.c13_addresses.json`](./script/.c13_addresses.json).
 
 ### Sepolia (ERC-4337 Hybrid, C-series)
 
@@ -222,7 +222,7 @@ Verify-tx gas is the full top-level tx cost including 21 K tx base + ~63 K for t
 
 ### ethrex Testnet (EIP-8141 Frame Tx - Pure PQ)
 
-Older demo devnet at `demo.eip-8141.ethrex.xyz` (chain 1729) — C9 / C10 / C11 frame accounts:
+Older demo devnet at `demo.eip-8141.ethrex.xyz` (chain 1729): C9 / C10 / C11 frame accounts:
 
 | Variant | Verifier | Frame Account | Gas | Verify | Tx |
 |---|---|---|---|---|---|
@@ -236,7 +236,7 @@ Current `eip-8141.ethrex.xyz` devnet (chain **3151908**, Osaka fork, frame opcod
 |---|---|---|---|---|
 | **C13** | [`0x659415...`](https://explorer.eip-8141.ethrex.xyz/address/0x6594157F1d690CbeBAA93dD13579FEb14E81F5C9) | [`0xae3bA3...`](https://explorer.eip-8141.ethrex.xyz/address/0xae3bA3e1DC1bD3866608ECA1498D3e9263B3481a) | **188 K** | [`0xabf3ce2f...`](https://explorer.eip-8141.ethrex.xyz/tx/0xabf3ce2f989fbb1480af2a6c0026f2335b643adb54561ebb536824af8faee81d) |
 
-> EIP-8141 type-0x06 frame tx, two frames: `[VERIFY(frame_account, sigHash‖c13_sig, flags=approve sender+payer), SENDER(0x...dead, value=0.00001 ETH)]`. The VERIFY frame's runtime staticcalls the shared C13 verifier and `APPROVE(0,0,3)`s on success. Sender by the frame account itself — no protocol-level signature needed. Reproduce with `script/send_frame_tx_c13.py`. Note: ethrex's on-chain `FrameTransaction` RLP layout differs from the draft EIP-8141 markdown by omitting the `signatures` field — the script handles this; the deviation is documented inline.
+> EIP-8141 type-0x06 frame tx, two frames: `[VERIFY(frame_account, sigHash‖c13_sig, flags=approve sender+payer), SENDER(0x...dead, value=0.00001 ETH)]`. The VERIFY frame's runtime staticcalls the shared C13 verifier and `APPROVE(0,0,3)`s on success. Sender by the frame account itself (no protocol-level signature needed). Reproduce with `script/send_frame_tx_c13.py`. Note: ethrex's on-chain `FrameTransaction` RLP layout differs from the draft EIP-8141 markdown by omitting the `signatures` field: the script handles this; the deviation is documented inline.
 
 ## Setup
 
@@ -283,6 +283,95 @@ cd signer-wasm && cargo test --release -- --ignored
 
 ## Formal Verification (Lean 4 / Verity)
 
-### Verified Kernel
+This repo ships a small Verity workbench under `verity/`. It models a strict
+subset of the live Solidity verifiers and proves that each model refines a
+functional spec. Source-to-model fidelity (the transcription of the
+handwritten Solidity assembly into Lean) is a review and differential-testing
+assumption; it is not itself a Verity obligation.
 
-This will include a proof with verity.
+### Scope of the modeled verifiers
+
+The Verity workbench currently models only two production verifiers:
+
+- `src/SPHINCs-C13Asm.sol` (keccak; the main production verifier). The model
+  includes the public-key canonicality guard from the Solidity: `pkSeed` and
+  `pkRoot` must each equal themselves masked by `N_MASK`, otherwise the
+  verifier reverts with `Invalid public key`.
+- `src/SLH-DSA-SHA2-128-24verifier.sol` (FIPS 205 external SLH-DSA, empty
+  context, SHA-256 precompile).
+
+The other live production verifiers, `src/SPHINCs-C7Asm.sol` and
+`src/SPHINCs-C9Asm.sol`, are **not** modeled and **not** verified. Treat
+them as unverified code. Any future Verity coverage would be a separate
+change.
+
+The C12 Verity model has been removed: C12 lives in `legacy/` and is no
+longer a production verifier. The old `SphincsC6/`, `SphincsC6Full/`,
+`SphincsC6V/`, and `SphincsKernel/` work, the `verity/artifacts/` Yul
+artifacts, and `test/MerkleKernelVerityTest.t.sol` have been removed from
+this tree. After this change, no Verity artifact is exercised by Foundry;
+nothing in `verity/` is compiled into a production contract or replayed
+in the test suite.
+
+### What the models are, and what they are not
+
+The Verity models in `verity/SphincsMinusVerifiers/Model.lean` are
+**hand-transcribed** from the Solidity inline assembly. They mirror the
+handwritten assembly structure (stacks, memory, and Yul revert fragments)
+and use Verity's ABI-aware `Bytes` parameter locals (`sig.length`,
+`sig.offset`).
+
+- The models are **not** compiled into the production contracts.
+- The models are **not** deployed.
+- The models are **not** replayed in the Foundry test suite. There is no
+  EVM-side regression test that takes the Lean model and runs it against
+  the on-chain verifier.
+- The proof target is model-to-byte-spec correspondence inside Lean.
+  Correspondence between the model and the deployed code rests on the
+  transcription itself being reviewed against the assembly.
+
+### Where the specs and models live
+
+- `verity/SphincsMinusVerifierSpec/Spec.lean` defines the byte-level
+  contract spec (`ByteLevel.verifyBytes`) and the abstract algorithmic
+  spec (`verifyParsed`, `verifySpec`). The byte spec refines the
+  algorithmic spec unconditionally: `verifyBytes_eq_verifySpec` and
+  `byteVerifier_refines_spec` are proved with no assumptions beyond
+  `propext`.
+- `verity/SphincsMinusVerifierSpec/C13Concrete.lean` and
+  `C13Mirror.lean` (plus the matching `Axioms` files) provide the
+  hand-coded `Primitives` instances and concrete FORS / hypertree
+  arithmetic that the algorithmic spec is checked against.
+- `verity/SphincsMinusVerifiers/Model.lean` holds the hand-transcribed
+  Verity models for the C13 keccak verifier and the
+  SLH-DSA-SHA2-128-24 verifier.
+- `verity/SphincsMinusVerifiers/Proofs.lean` is the per-verifier
+  refinement surface, with `c13_refines_spec` and
+  `slhDsaSha2_128_24_refines_spec` as the top-level theorems.
+
+### Proof state and remaining trust surface
+
+- `c13_refines_spec` is currently proved in Lean and rests on Lean's
+  logic plus three named residual assembly axioms, all enumerated in
+  `verity/SphincsMinusVerifiers/AXIOMS.md`. The keccak hashing in the
+  C13 model is concrete (the interpreter's own pure Keccak), so no
+  opaque primitive axiom remains on the C13 side. A follow-up PR is
+  discharging the residual assembly axioms; once it lands,
+  `c13_refines_spec` will rest on Lean's logic alone.
+- `slhDsaSha2_128_24_refines_spec` is proved in Lean but additionally
+  keeps a named bridge axiom for byte-addressed memory modeling (the
+  SHA-256 precompile path uses overlapping sub-word `mstore`s that the
+  current word-keyed interpreter does not represent) and an opaque
+  SHA-256 primitives constant.
+- A hand-held walkthrough of what SPHINCS- is, what a correct verifier
+  must check, and how the proof is structured is at
+  **https://lfglabs.dev/research/sphincs-minus-verifier**.
+
+The full remaining trust surface (every named bridge axiom, opaque
+primitive, and residual assembly axiom) is enumerated in
+`verity/SphincsMinusVerifiers/AXIOMS.md`. Cryptographic security of the
+scheme itself (hash collision resistance, EUF-CMA) is an assumption
+outside the proofs, not a Lean axiom; the theorems establish
+implementation correctness only. The README is worded so it
+stays true in both proof states: as of today, and after the residual
+assembly obligations are discharged.
