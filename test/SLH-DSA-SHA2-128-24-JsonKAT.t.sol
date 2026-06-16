@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/SLH-DSA-SHA2-128-24verifier.sol";
+import "../src/sha/SLH-DSA-SHA2-128-24verifier.sol";
 
 /// @notice JSON-fixture Known-Answer Test for the FIPS 205 EXTERNAL
 ///         SLH-DSA-SHA2-128-24 verifier (empty context, M wrapped as 0x00 0x00 || M).

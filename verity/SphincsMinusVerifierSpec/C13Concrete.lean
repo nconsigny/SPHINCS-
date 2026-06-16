@@ -500,7 +500,7 @@ def adrsForsRootsC13 (digest : HMsg) : Word :=
   adrsForsRoots (idxTree0C13 digest) (idxLeaf0C13 digest)
 
 /-- `adrsForsBase` is a bounded 192-bit word (well below 2^256) when
-`idxTree0 < 2^64` and `idxLeaf0 < 2^32` (the maximum the FIPS 205 §11.2.2
+`idxTree0 < 2^64` and `idxLeaf0 < 2^32` (the maximum the FIPS 205 §4.2
 32-byte ADRS ever needs: 12-byte tree field + 4-byte kp).  This is the
 *only* place the bit-disjointness reasoning for the `adrsForsBase` summand
 lives; the leaf / node corollaries call it.  Returning `< 2^192` (not the

@@ -36,7 +36,7 @@ There are different ways to construct the SPHINCS signature scheme. Existing lit
 - **Verify (pure)**: Foundry `gasleft()` measurement of the assembly block.
 - **Frame**: total EIP-8141 frame-tx gas (ethrex). C12 / SLH-DSA-128-24 are not yet wired to frame accounts in this repo.
 - **4337**: total ERC-4337 `handleOps` tx gas (Sepolia). The 4337 wiring for C7 / C11 lives in `SphincsAccount` + `SphincsAccountFactory`; no SLH-DSA or C12 account exists here yet.
-- **†**: C13 uses the **FIPS 205 §11.2.2 uncompressed 32-byte ADRS layout** with keccak256, not JARDIN's. First verifier on the FIPS address layout (see the *Address layout* subsection below).
+- **†**: C13 uses the **FIPS 205 §4.2 uncompressed 32-byte ADRS layout** with keccak256, not JARDIN's. First verifier on the FIPS address layout (see the *Address layout* subsection below).
 
 ### C13 vs the rest of the family: what changes
 
@@ -51,7 +51,7 @@ C13's parameter choice (`h=22 d=2 a=19 k=7 w=8`) was built around three goals: s
 | Signature-count cap            | 2²⁴     | 2¹⁶     | 2²²     | 2²⁰ (h=20, d=5) | 2²⁴ ‡ | 2²⁴ ‡ |
 | Security at the cap            | 128 bit | 86 bit  | **128 bit** | 95 bit | 128 bit § | 128 bit § |
 | Hash-call cost / sign (cold)   | 4.3 M   | 292 K   | ~10 M   | 36.6 K | ~1.07 B | ~1.07 B |
-| ADRS layout                    | **FIPS uncompressed** | JARDIN  | **FIPS uncompressed** | JARDIN | FIPS ADRSc | JARDIN |
+| ADRS layout                    | **FIPS uncompressed** | **FIPS uncompressed** | **FIPS uncompressed** | **FIPS uncompressed** | FIPS ADRSc | JARDIN |
 
 ‡ **SLH-DSA-*-128-24 cap is a usage cap, not a leaf budget.** h=22, d=1 ⇒ a single XMSS tree of 2²² WOTS leaves; the leaf is chosen pseudorandomly per message, so by 2²⁴ signatures leaves have been reused ~4× on average (and birthday collisions begin ~2¹¹). Unlike C7/C13, whose 2²⁴/2²² figures are the actual hypertree-leaf counts at full one-time-WOTS security, the SLH "2²⁴" exceeds its 2²² leaf space by design.
 
@@ -73,17 +73,31 @@ C11 and C12 are light enough to run on a hardware wallet, 390s and 47.5s signatu
 
 ### Shared hash kernel
 
-The repo now ships **only two ADRS layouts** in `src/`, both straight out of FIPS 205: **FIPS uncompressed 32 B for the keccak/SHAKE-family hashes** (C7, C9, C13) and **FIPS ADRSc 22 B for SHA-2** (SLH-DSA-SHA2). The keccak-family verifiers used to all share JARDIN's layout; C7/C9/C13 migrated to FIPS uncompressed, and the verifiers that stayed on JARDIN (C11, C12, and the keccak SLH-DSA twin) were **retired to `legacy/`** rather than migrated. The JARDIN row below is kept for historical reference; those contracts are frozen, not part of the default build.
+Live verifiers in `src/` are organized **one folder per hash function**: `src/keccak/` and `src/sha/` (accounts stay in `src/` root). There are still **only two ADRS byte layouts**, both straight out of FIPS 205: **FIPS uncompressed 32 B** (keccak family) and **FIPS ADRSc 22 B** (SHA-2 family). The keccak C-series all migrated off JARDIN to FIPS uncompressed (C13 first, then C7/C9, then C11/C12); only the keccak SLH-DSA twin stays on JARDIN, **retired to `legacy/`** (along with the JARDIN-layout C11/C12 originals, kept for benchmark reproducibility and the [nconsigny/JARDIN](https://github.com/nconsigny/JARDIN) repo's `JardinSpxVerifier` reference).
+
+`src/sha/` holds the **SHA-256 twins** of C11/C13/C12 plus the NIST SLH-DSA-SHA2. C11-SHA/C13-SHA are *minimal twins* (compact construction kept; not FIPS — one-shot H_msg, MSB-first parsing); C12-SHA is *full FIPS 205 SLH-DSA-SHA2* at C12 params (MGF1 H_msg, empty-context envelope). See [SHA-256 twins](#sha-256-twins-srcsha) below.
 
 | Layout | Variants | ADRS bytes | Hash | F/H/T input |
 |---|---|---|---|---|
-| **FIPS uncompressed 32 B** | **C7, C9, C13** (C13 first)          | `layer4 ‖ tree12 ‖ type4 ‖ word1·4 ‖ word2·4 ‖ word3·4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
-| _JARDIN 32 B (retired → `legacy/`)_ | C11, C12, SLH-DSA-Keccak-128-24 | `layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
-| **FIPS ADRSc 22 B**        | SLH-DSA-SHA2-128-24                  | `layer1 ‖ tree8 ‖ type1 ‖ 12 B type-dependent` | SHA-256 (precompile 0x02) | `PK.seed(16) ‖ zeros(48) ‖ ADRSc(22) ‖ payload` |
+| **FIPS uncompressed 32 B** (`src/keccak/`) | **C7, C9, C11, C12, C13** (C13 first)          | `layer4 ‖ tree12 ‖ type4 ‖ word1·4 ‖ word2·4 ‖ word3·4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
+| **FIPS ADRSc 22 B** (`src/sha/`) | C11-SHA, C13-SHA, C12-SHA, SLH-DSA-SHA2-128-24 | `layer1 ‖ tree8 ‖ type1 ‖ 12 B type-dependent` | SHA-256 (precompile 0x02) | `PK.seed(16) ‖ zeros(48) ‖ ADRSc(22) ‖ payload` |
+| _JARDIN 32 B (retired → `legacy/`)_ | SLH-DSA-Keccak-128-24; legacy C11/C12 originals | `layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
+
+### SHA-256 twins (`src/sha/`)
+
+SHA-256 + 22-byte ADRSc versions of the keccak verifiers, for deployments that prefer the SHA-256 precompile (e.g. cross-impl alignment with the FIPS SHA-2 family) over native keccak. The hash and address change as a coupled unit (SHA-256; FIPS §11.2 ADRSc; MSB-first `base_2b` parsing); they cost more gas than the keccak originals (SHA-256 precompile staticcall vs native opcode).
+
+| Variant | Construction | FIPS? | Sig | Verify gas (harness) |
+|---|---|---|---|---|
+| **C11-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 3,976 B | ~473 K |
+| **C13-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 3,688 B | ~440 K |
+| **C12-SHA** | plain SPHINCS+, full FIPS 205 SLH-DSA-SHA2 (MGF1 H_msg, `0x00‖0x00` envelope, standard checksum) | Algorithm yes; params not a NIST set (no KAT) | 6,496 B | ~908 K |
+
+The compact twins (C11/C13) **cannot** be made FIPS-compliant — their WOTS+C/FORS+C counter-grinding has no FIPS 205 analog — so they only borrow the SHA-256 hash + ADRSc. C12 is plain SPHINCS+, so it takes the full FIPS algorithm. Vectors: `script/signer.py {c11-sha,c13-sha}` and `script/slh_dsa_sha2_c12_signer.py`.
 
 ### Address layout
 
-**FIPS 205 §4.2 / §11.2.2 uncompressed 32-byte ADRS** (the SHAKE-instantiation form):
+**FIPS 205 §4.2 uncompressed 32-byte ADRS** (the SHAKE-instantiation form):
 
 ```
 bytes  0.. 4  layer address       (uint32)
@@ -102,7 +116,7 @@ bytes 28..32  word3 (type-dependent)
 | 3 | FORS_TREE  | key_pair_address | tree_height | tree_index |
 | 4 | FORS_ROOTS | key_pair_address | 0 | 0 |
 
-**JARDIN 32-byte ADRS** (retired to `legacy/`; was used by C11/C12/SLH-DSA-Keccak; C7/C9 migrated off it): same 32-byte width, but with an 8-byte `tree` field (FIPS gives it 12) and **four** type-dependent words (FIPS uses three). The freed-up byte budget went to `ci` (chain_index) being a dedicated WOTS-only slot, while in FIPS `chain_address` and `tree_height` share `word2` (same bytes, type-dependent meaning). JARDIN's 4th word (`ha`) is unused for every type in practice; the structural divergence from FIPS is the 8 vs 12 byte tree field.
+**JARDIN 32-byte ADRS** (retired to `legacy/`; was used by C7/C9/C11/C12/SLH-DSA-Keccak before all the C-series migrated to FIPS uncompressed): same 32-byte width, but with an 8-byte `tree` field (FIPS gives it 12) and **four** type-dependent words (FIPS uses three). The freed-up byte budget went to `ci` (chain_index) being a dedicated WOTS-only slot, while in FIPS `chain_address` and `tree_height` share `word2` (same bytes, type-dependent meaning). JARDIN's 4th word (`ha`) is unused for every type in practice; the structural divergence from FIPS is the 8 vs 12 byte tree field.
 
 **Why C13 moved to FIPS uncompressed.** "Reduce differences between families": FIPS-aligning the ADRS makes the keccak verifier port cleanly from a FIPS reference implementation, and pares the repo's address-layout inventory toward just two layouts (above). The hash stays keccak256; switching to SHA-256 would double on-chain gas (precompile staticcall vs native opcode) and would only be relevant if we needed full SLH-DSA-SHA2 family alignment, which we don't.
 
@@ -162,7 +176,7 @@ SPHINCs- and ECDSA are derived through independent paths - compromising one does
 
 | Signer | Language | Targets | BIP-39 |
 |---|---|---|---|
-| `script/signer.py` | Python | C-series (C7 / C9 / C11) | No |
+| `script/signer.py` | Python | C-series (C7/C9/C11/C13) + SHA twins (c11-sha/c13-sha) | No |
 | `signer-wasm/` | Rust/WASM | C-series | **Yes** |
 | `script/slh_dsa_sha2_128_24_signer.py` | Python (slow; ~hours at NIST params) | SLH-DSA-SHA2-128-24 | No |
 | `script/slh_dsa_keccak_128_24_signer.py` | Python (slow; ~hours at NIST params) | SLH-DSA-Keccak-128-24 | No |
@@ -208,7 +222,7 @@ New C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each ac
 | C11 | [`0xC25ef5...`](https://sepolia.etherscan.io/address/0xC25ef566884DC36649c3618EEDF66d715427Fd74) | [`0x3C3b0c...`](https://sepolia.etherscan.io/address/0x3C3b0c3498E5ed9350F6fBFA0Ef8dC55f524eA50) | 308 K | [`0x9fba169c...`](https://sepolia.etherscan.io/tx/0x9fba169ca76b6712586e44e1a4a2d0407b8b8b9ce767272a193e41a756260b74) |
 | **C13** | [`0xce176d...`](https://sepolia.etherscan.io/address/0xce176df2680f6612a61486f74502db62d014d23d) | [`0xcef985...`](https://sepolia.etherscan.io/address/0xcef985d4db485e96ab9187ad462561bff241db0d) (factory [`0xcaf5d2...`](https://sepolia.etherscan.io/address/0xcaf5d2582eb405e3c4b65f3a52d147badfd96fed)) | 293 K | [`0xbbf06456...`](https://sepolia.etherscan.io/tx/0xbbf06456145a4daea1b5006f1f5d7b214c62c1c2877eabb61ae4b26e453189d0) |
 
-> **C13 on Sepolia uses the FIPS 205 §11.2.2 uncompressed 32-byte ADRS** (keccak256 hash). First verifier in the repo on the FIPS address layout. Standalone verify tx-level gas: **188,278**. Full hybrid-4337 `handleOps` UserOp gas: **292,727** (ECDSA recovery + C13 verify + 0.00001 ETH self-transfer through `SphincsAccount.execute`). See [`script/.c13_addresses.json`](./script/.c13_addresses.json) for the canonical address record.
+> **C13 on Sepolia uses the FIPS 205 §4.2 uncompressed 32-byte ADRS** (keccak256 hash). First verifier in the repo on the FIPS address layout. Standalone verify tx-level gas: **188,278**. Full hybrid-4337 `handleOps` UserOp gas: **292,727** (ECDSA recovery + C13 verify + 0.00001 ETH self-transfer through `SphincsAccount.execute`). See [`script/.c13_addresses.json`](./script/.c13_addresses.json) for the canonical address record.
 
 ### Sepolia (SLH-DSA-128-24 standalone verifiers, no account wired yet)
 
@@ -292,20 +306,22 @@ assumption; it is not itself a Verity obligation.
 
 The Verity workbench currently models only two production verifiers:
 
-- `src/SPHINCs-C13Asm.sol` (keccak; the main production verifier). The model
+- `src/keccak/SPHINCs-C13Asm.sol` (keccak; the main production verifier). The model
   includes the public-key canonicality guard from the Solidity: `pkSeed` and
   `pkRoot` must each equal themselves masked by `N_MASK`, otherwise the
   verifier reverts with `Invalid public key`.
-- `src/SLH-DSA-SHA2-128-24verifier.sol` (FIPS 205 external SLH-DSA, empty
+- `src/sha/SLH-DSA-SHA2-128-24verifier.sol` (FIPS 205 external SLH-DSA, empty
   context, SHA-256 precompile).
 
-The other live production verifiers, `src/SPHINCs-C7Asm.sol` and
-`src/SPHINCs-C9Asm.sol`, are **not** modeled and **not** verified. Treat
+The other live production verifiers, `src/keccak/SPHINCs-C7Asm.sol`,
+`src/keccak/SPHINCs-C9Asm.sol`, `src/keccak/SPHINCs-C11Asm.sol`, and
+`src/keccak/SPHINCs-C12Asm.sol`, are **not** modeled and **not** verified. Treat
 them as unverified code. Any future Verity coverage would be a separate
 change.
 
-The C12 Verity model has been removed: C12 lives in `legacy/` and is no
-longer a production verifier. The old `SphincsC6/`, `SphincsC6Full/`,
+The old C12 Verity model (which targeted the JARDIN-layout C12) has been
+removed; C12 has since been migrated to FIPS uncompressed and lives in
+`src/` again, but remains unmodeled. The old `SphincsC6/`, `SphincsC6Full/`,
 `SphincsC6V/`, and `SphincsKernel/` work, the `verity/artifacts/` Yul
 artifacts, and `test/MerkleKernelVerityTest.t.sol` have been removed from
 this tree. After this change, no Verity artifact is exercised by Foundry;

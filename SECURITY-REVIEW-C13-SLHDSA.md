@@ -6,7 +6,7 @@
 > confers no audit-grade assurance. Treat it as a best-effort engineering review.
 
 **Scope:** Two cryptographic families, signer side and on-chain verifier side.
-1. **C13** — custom lightweight SPHINCS+ "+C" variant (ePrint 2025/2203 family), FIPS 205 §11.2.2 uncompressed 32-byte ADRS + keccak256. Verifier `src/SPHINCs-C13Asm.sol`; signers `signer-wasm/` (Rust), `script/signer.py`.
+1. **C13** — custom lightweight SPHINCS+ "+C" variant (ePrint 2025/2203 family), FIPS 205 §4.2 uncompressed 32-byte ADRS + keccak256. Verifier `src/SPHINCs-C13Asm.sol`; signers `signer-wasm/` (Rust), `script/signer.py`.
 2. **SLH-DSA-SHA2-128-24** — NIST SP 800-230 IPD parameter set, claimed FIPS 205 bit-exact. Verifier `src/SLH-DSA-SHA2-128-24verifier.sol`; reference oracle `signers/sphincsplus-128-24/` (C), `script/slh_dsa_sha2_128_24_*signer.py`.
 
 Out of scope and **not examined**: SLH-DSA-Keccak twin, slhvk Vulkan GPU signer, C7/C9/C11/C12, legacy verifiers.

@@ -60,7 +60,7 @@ VARIANTS = {
     "c11": {"h": 16, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 8, "sig_size": 3976,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 203, "w_mask": 0x7},
-    # c13 uses the FIPS 205 §11.2.2 uncompressed 32-byte ADRS layout, which
+    # c13 uses the FIPS 205 §4.2 uncompressed 32-byte ADRS layout, which
     # this legacy signer does NOT implement (it only has JARDIN ADRS). Use
     # ../../script/signer.py instead. Entry kept for `VARIANTS["c13"]` lookups
     # but `sign_variant("c13", …)` here would produce wrong signatures.

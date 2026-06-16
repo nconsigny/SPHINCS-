@@ -1,7 +1,7 @@
 /-
   SegmentS4ForsMerkleFrame — lightweight adapters connecting the S4 FORS inner
   climb statement to the generic Merkle memory-frame loop adapters, on the
-  FIPS 205 §11.2.2 FORS address layout.
+  FIPS 205 §4.2 FORS address layout.
 
   The FORS inner climb is `forEach "h" (u 19) ClimbKit.forsClimbBody` — the
   address-parametric `merkleClimbBodyA` instantiated at `ClimbKit.forsAdrs`

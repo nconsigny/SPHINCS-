@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /// @title SphincsC13Asm — Stateless SPHINCS+ C13 verifier (shared, Yul-optimized)
 /// @notice C13: W+C_F+C h=22 d=2 a=19 k=7 w=8 l=43 target_sum=208 sig=3688
-/// @dev    Address layout: **FIPS 205 §4.2 / §11.2.2 uncompressed 32-byte ADRS**
+/// @dev    Address layout: **FIPS 205 §4.2 uncompressed 32-byte ADRS**
 ///         (the SHAKE-instantiation form), with keccak256 substituted for
 ///         SHAKE-256 to stay native on EVM. C13 was the first verifier in this
 ///         repo on the FIPS ADRS layout; C7/C9 have since migrated to it, so every

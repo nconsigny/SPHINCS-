@@ -14,6 +14,7 @@ Output: ABI-encoded (bytes32 seed, bytes32 root, bytes sig) as hex to stdout.
 import sys
 import struct
 import time
+import hashlib
 import multiprocessing
 from Crypto.Hash import keccak as _keccak_mod
 
@@ -64,12 +65,27 @@ VARIANTS = {
     "c11": {"h": 16, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 8, "sig_size": 3976,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 203, "w_mask": 0x7,
+            "adrs_mode": "fips",      # migrated to FIPS 205 uncompressed ADRS
             "fors_bind_leaf": True},  # key FORS instance by per-message hypertree leaf (FIPS field split)
     "c13": {"h": 22, "d": 2, "k": 7, "a": 19, "m_max": 0, "scheme": "fors",
             "subtree_h": 11, "sig_size": 3688,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 208, "w_mask": 0x7,
-            "adrs_mode": "fips",      # FIPS 205 §11.2.2 uncompressed 32-byte ADRS
+            "adrs_mode": "fips",      # FIPS 205 §4.2 uncompressed 32-byte ADRS
             "fors_bind_leaf": True},  # key FORS instance by per-message hypertree leaf (FIPS field split)
+    # SHA-2 "minimal twins" of the compact variants: identical construction and
+    # signature byte layout, but SHA-256 + 22-byte ADRSc (FIPS §11.2 framing) and
+    # MSB-first digest parsing. NOT FIPS-compliant (WOTS+C/FORS+C counter-grinding
+    # has no FIPS analog); one-shot H_msg, no context envelope. See src/sha/.
+    "c11-sha": {"h": 16, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
+            "subtree_h": 8, "sig_size": 3976,
+            "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 203, "w_mask": 0x7,
+            "adrs_mode": "adrsc", "hash": "sha2", "parse": "msb",
+            "fors_bind_leaf": True},
+    "c13-sha": {"h": 22, "d": 2, "k": 7, "a": 19, "m_max": 0, "scheme": "fors",
+            "subtree_h": 11, "sig_size": 3688,
+            "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 208, "w_mask": 0x7,
+            "adrs_mode": "adrsc", "hash": "sha2", "parse": "msb",
+            "fors_bind_leaf": True},
 }
 
 # ============================================================
@@ -125,7 +141,7 @@ def make_adrs(layer, tree, atype, kp, ci, cp, ha):
             (ha & 0xFFFFFFFF))
 
 def make_adrs_fips(layer, tree, atype, kp, ci, cp, ha):
-    """FIPS 205 §4.2 / §11.2.2 uncompressed 32-byte ADRS.
+    """FIPS 205 §4.2 uncompressed 32-byte ADRS.
 
     Layout: layer(4) || tree(12) || type(4) || word1(4) || word2(4) || word3(4).
     Word assignments per type (FIPS 205 Table 1):
@@ -156,13 +172,112 @@ def make_adrs_fips(layer, tree, atype, kp, ci, cp, ha):
             (w2 & 0xFFFFFFFF) << 32 |
             (w3 & 0xFFFFFFFF))
 
+# ============================================================
+#  SHA-256 / ADRSc backend (FIPS 205 §11.2 instantiation form)
+#
+#  Selected per-variant via cfg["hash"] == "sha2" (+ cfg["adrs_mode"] ==
+#  "adrsc" + cfg["parse"] == "msb"). Every tweakable hash is
+#    SHA-256(PK.seed(16) ‖ toByte(0,48) ‖ ADRSc(22) ‖ payload)[0..15]
+#  i.e. the seed is zero-padded to a full 64-byte SHA-256 block, then the
+#  22-byte compressed ADRSc, then the 16-byte-packed payload. The result is
+#  returned top-aligned (value in the high 128 bits) to match the keccak
+#  convention. The keccak path is untouched: with HASH_BACKEND == "keccak"
+#  every dispatcher below falls through to the original keccak code.
+# ============================================================
+
+HASH_BACKEND = "keccak"   # set by sign_variant() from cfg["hash"]
+
+ZEROS48 = b"\x00" * 48
+
+def _hi16(x: int) -> bytes:
+    """Top 16 bytes (the value) of a top-aligned 256-bit int."""
+    return (x & FULL).to_bytes(32, "big")[:16]
+
+def _adrsc22(adrs: int) -> bytes:
+    """Top 22 bytes of a top-aligned 256-bit ADRSc int."""
+    return (adrs & FULL).to_bytes(32, "big")[:22]
+
+def sha256_int(data: bytes) -> int:
+    """SHA-256(data) as a big-endian 256-bit int (full 32-byte digest)."""
+    return int.from_bytes(hashlib.sha256(data).digest(), "big")
+
+def sha256_n(data: bytes) -> int:
+    """SHA-256(data)[0..15] returned top-aligned (value in high 128 bits)."""
+    return int.from_bytes(hashlib.sha256(data).digest()[:16] + b"\x00" * 16, "big")
+
+def make_adrs_adrsc(layer, tree, atype, kp, ci, cp, ha):
+    """FIPS 205 §11.2 compressed ADRS (ADRSc), 22 bytes, top-aligned in 256 bits.
+
+    Layout: layer(1) ‖ tree(8) ‖ type(1) ‖ word1(4) ‖ word2(4) ‖ word3(4).
+    Preserves the (layer,tree,type,kp,ci,cp,ha) call signature; maps to FIPS
+    word positions per type exactly like make_adrs_fips (FIPS 205 Table 1)."""
+    if atype == 0:
+        w1, w2, w3 = kp, ci, cp
+    elif atype == 1:
+        w1, w2, w3 = kp, 0, 0
+    elif atype == 2:
+        w1, w2, w3 = 0, cp, ha
+    elif atype == 3:
+        w1, w2, w3 = kp, cp, ha
+    elif atype == 4:
+        w1, w2, w3 = kp, 0, 0
+    else:
+        raise ValueError(f"unknown ADRS type {atype}")
+    return ((layer & 0xFF) << 248 |
+            (tree & 0xFFFFFFFFFFFFFFFF) << 184 |    # 64-bit tree field
+            (atype & 0xFF) << 176 |
+            (w1 & 0xFFFFFFFF) << 144 |
+            (w2 & 0xFFFFFFFF) << 112 |
+            (w3 & 0xFFFFFFFF) << 80)
+
+def th_sha2(seed, adrs, inp):
+    return sha256_n(_hi16(seed) + ZEROS48 + _adrsc22(adrs) + _hi16(inp))
+
+def th_pair_sha2(seed, adrs, left, right):
+    return sha256_n(_hi16(seed) + ZEROS48 + _adrsc22(adrs) + _hi16(left) + _hi16(right))
+
+def th_multi_sha2(seed, adrs, vals):
+    return sha256_n(_hi16(seed) + ZEROS48 + _adrsc22(adrs) + b"".join(_hi16(v) for v in vals))
+
+def wots_digest_sha2(seed, adrs, msg_hash, count):
+    """WOTS+C counter digest (full 256-bit output, parsed MSB-first).
+    payload = currentNode(16) ‖ count(4, big-endian)."""
+    return sha256_int(_hi16(seed) + ZEROS48 + _adrsc22(adrs) +
+                      _hi16(msg_hash) + (count & 0xFFFFFFFF).to_bytes(4, "big"))
+
+def h_msg_sha2(seed, root, R, message):
+    """One-shot SHA-256 H_msg for the compact SHA twins (full 256-bit output).
+    Same 160-byte preimage as the keccak H_msg, SHA-256 instead of keccak."""
+    return sha256_int(to_b32(seed) + to_b32(root) + to_b32(R) +
+                      to_b32(message) + to_b32(HMSG_DOMAIN))
+
+def set_chain_index_adrsc(adrs, idx):
+    """ADRSc WOTS_HASH: chain_address is word2 (shl 112)."""
+    mask = FULL ^ (0xFFFFFFFF << 112)
+    return (adrs & mask) | ((idx & 0xFFFFFFFF) << 112)
+
+def chain_hash_adrsc(seed, adrs, val, start_pos, steps):
+    """ADRSc chain hash: hash_address is word3 (shl 80)."""
+    pos_clear = FULL ^ (0xFFFFFFFF << 80)
+    for step in range(steps):
+        pos = start_pos + step
+        a = (adrs & pos_clear) | ((pos & 0xFFFFFFFF) << 80)
+        val = th_sha2(seed, a, val)
+    return val
+
 def th(seed, adrs, inp):
+    if HASH_BACKEND == "sha2":
+        return th_sha2(seed, adrs, inp)
     return _keccak_3x32(seed, adrs, inp) & N_MASK
 
 def th_pair(seed, adrs, left, right):
+    if HASH_BACKEND == "sha2":
+        return th_pair_sha2(seed, adrs, left, right)
     return _keccak_4x32(seed, adrs, left, right) & N_MASK
 
 def th_multi(seed, adrs, vals):
+    if HASH_BACKEND == "sha2":
+        return th_multi_sha2(seed, adrs, vals)
     data = to_b32(seed) + to_b32(adrs)
     for v in vals:
         data += to_b32(v)
@@ -173,9 +288,21 @@ HMSG_DOMAIN = (1 << 256) - 1  # 0xFFFF...FF — domain separator for H_msg
 def h_msg(seed, root, R, message):
     """Domain-separated H_msg: keccak256(seed || root || R || message || domain).
     Hashes 160 bytes (5 words) vs 128 for ThPair/wotsDigest, ensuring
-    unconditional domain separation via keccak's sponge construction."""
+    unconditional domain separation via keccak's sponge construction.
+    SHA-2 compact twins use a one-shot SHA-256 over the same 160-byte preimage."""
+    if HASH_BACKEND == "sha2":
+        return h_msg_sha2(seed, root, R, message)
     data = to_b32(seed) + to_b32(root) + to_b32(R) + to_b32(message) + to_b32(HMSG_DOMAIN)
     return keccak256(data)
+
+def _field(digest, lsb_off, width, cfg=None):
+    """Extract a `width`-bit field from a 256-bit digest. Default LSB-first
+    (keccak/JARDIN convention); cfg["parse"] == "msb" reads the same field from
+    the MSB end (FIPS-leaning, used by the SHA twins). The two are exact
+    mirrors: MSB offset = 256 - lsb_off - width."""
+    if cfg and cfg.get("parse") == "msb":
+        return (digest >> (256 - lsb_off - width)) & ((1 << width) - 1)
+    return (digest >> lsb_off) & ((1 << width) - 1)
 
 def chain_hash(seed, adrs, val, start_pos, steps):
     """JARDIN chain hash: hash_address packed into `cp` (bytes 24..28, shl 32)."""
@@ -207,7 +334,10 @@ def set_chain_index_fips(adrs, idx):
 
 def _adrs_helpers(cfg):
     """Return (make_adrs_fn, set_chain_index_fn, chain_hash_fn) for the variant."""
-    if cfg is not None and cfg.get("adrs_mode") == "fips":
+    mode = cfg.get("adrs_mode") if cfg is not None else None
+    if mode == "adrsc":
+        return make_adrs_adrsc, set_chain_index_adrsc, chain_hash_adrsc
+    if mode == "fips":
         return make_adrs_fips, set_chain_index_fips, chain_hash_fips
     return make_adrs, set_chain_index, chain_hash
 
@@ -289,11 +419,13 @@ def wots_keygen(seed, sk_seed, layer, tree, kp, cfg=None):
 def wots_digest(seed, layer, tree, kp, msg_hash, count, cfg=None):
     mk_adrs, _, _ = _adrs_helpers(cfg)
     hash_adrs = mk_adrs(layer, tree, ADRS_WOTS, kp, 0, 0, 0)
+    if HASH_BACKEND == "sha2":
+        return wots_digest_sha2(seed, hash_adrs, msg_hash, count)
     return _keccak_4x32(seed, hash_adrs, msg_hash, count)
 
 def extract_digits(d, cfg=None):
     _, log_w, _, len1, _, w_mask = _wots_params(cfg)
-    return [(d >> (i * log_w)) & w_mask for i in range(len1)]
+    return [_field(d, i * log_w, log_w, cfg) for i in range(len1)]
 
 def wots_find_count(seed, layer, tree, kp, msg_hash, cfg=None):
     _, _, _, _, target_sum, _ = _wots_params(cfg)
@@ -410,7 +542,7 @@ def build_fors_tree(seed, sk_seed, tree_idx, a, cfg=None, ht_idx=None, idx_leaf0
 def fors_sign_full(seed, sk_seed, digest, k, a, cfg=None):
     mk_adrs, _, _ = _adrs_helpers(cfg)
     a_mask = (1 << a) - 1
-    indices = [(digest >> (i * a)) & a_mask for i in range(k)]
+    indices = [_field(digest, i * a, a, cfg) for i in range(k)]
     assert indices[k - 1] == 0, f"Forced-zero violated: last index = {indices[k-1]}"
 
     # Exact FIPS 205 FORS field split: key the FORS instance by the per-message
@@ -420,7 +552,7 @@ def fors_sign_full(seed, sk_seed, digest, k, a, cfg=None):
     # variants without the binding are byte-for-byte unchanged.
     ht_idx = idx_leaf0 = idx_tree0 = None
     if cfg and cfg.get("fors_bind_leaf"):
-        ht_idx = (digest >> (k * a)) & ((1 << cfg["h"]) - 1)
+        ht_idx = _field(digest, k * a, cfg["h"], cfg)
         sh = cfg["subtree_h"]
         idx_leaf0 = ht_idx & ((1 << sh) - 1)
         idx_tree0 = ht_idx >> sh
@@ -548,13 +680,11 @@ def compute_octopus_auth_set(tree_nodes, sorted_indices, tree_height):
 # layout MUST match signer-wasm/src/fors.rs::grind_r byte-for-byte or the
 # Rust<->Python cross-check (and the on-chain digest) diverge. The verifier is
 # unaffected — it only reads R out of the signature.
-def grind_R_fors(seed, sk_seed, root, message, k, a):
-    a_mask = (1 << a) - 1
-    last_shift = (k - 1) * a
+def grind_R_fors(seed, sk_seed, root, message, k, a, cfg=None):
     for nonce in range(10_000_000):
         R = keccak256(to_b32(sk_seed) + b"R_grind" + to_b32(message) + to_b32(nonce)) & N_MASK
         digest = h_msg(seed, root, R, message)
-        if (digest >> last_shift) & a_mask == 0:
+        if _field(digest, (k - 1) * a, a, cfg) == 0:
             eprint(f"  R grind: found at nonce={nonce}")
             return R, digest
     raise RuntimeError("R grinding failed")
@@ -581,6 +711,77 @@ def eprint(*args, **kwargs):
 #  Full Signing
 # ============================================================
 
+def verify_c_series(seed, root, message, sig, cfg):
+    """Full mirror of the on-chain C-series verifier (FORS+C / WOTS+C, d∈{2}).
+
+    Backend-agnostic: uses the cfg-dispatched hashes / ADRS / parse helpers, so
+    it validates BOTH the keccak verifiers and the SHA-2 twins. Recomputes the
+    root from the signature bytes and returns whether it matches `root`. Used as
+    a signer self-check and as the exact reference the Solidity is transcribed
+    from (so an FFI failure isolates cleanly to a Solidity transcription bug)."""
+    n = N
+    k = cfg["k"]; a = cfg["a"]; h = cfg["h"]; d = cfg["d"]; subtree_h = cfg["subtree_h"]
+    w, _, l, _, target_sum, _ = _wots_params(cfg)
+    mk_adrs, set_ci, ch_hash = _adrs_helpers(cfg)
+
+    def rd(o):  # 16-byte top-aligned value at byte offset o
+        return int.from_bytes(sig[o:o + n] + b"\x00" * 16, "big")
+
+    R = rd(0)
+    digest = h_msg(seed, root, R, message)
+    if _field(digest, (k - 1) * a, a, cfg) != 0:
+        return False
+    htIdx = _field(digest, k * a, h, cfg)
+    idx_leaf0 = htIdx & ((1 << subtree_h) - 1)
+    idx_tree0 = htIdx >> subtree_h
+
+    # ---- FORS+C ----
+    auth_start = n + k * n
+    per_auth = a * n
+    roots = []
+    for t in range(k - 1):
+        mdT = _field(digest, t * a, a, cfg)
+        node = th(seed, mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, 0, (t << a) | mdT), rd(n + t * n))
+        path_idx = mdT
+        ap = auth_start + t * per_auth
+        for hh in range(a):
+            sib = rd(ap + hh * n)
+            parent = path_idx >> 1
+            adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, hh + 1, (t << (a - 1 - hh)) | parent)
+            node = th_pair(seed, adrs, node, sib) if (path_idx & 1) == 0 else th_pair(seed, adrs, sib, node)
+            path_idx = parent
+        roots.append(node)
+    fz_adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, 0, (k - 1) << a)
+    roots.append(th(seed, fz_adrs, rd(n + (k - 1) * n)))
+    current = th_multi(seed, mk_adrs(0, idx_tree0, ADRS_FORS_ROOTS, idx_leaf0, 0, 0, 0), roots)
+
+    # ---- Hypertree (WOTS+C + Merkle) ----
+    idx_tree = htIdx
+    off = auth_start + (k - 1) * per_auth
+    for layer in range(d):
+        idx_leaf = idx_tree & ((1 << subtree_h) - 1)
+        idx_tree = idx_tree >> subtree_h
+        count = int.from_bytes(sig[off + l * n: off + l * n + 4], "big")
+        digits = extract_digits(wots_digest(seed, layer, idx_tree, idx_leaf, current, count, cfg), cfg)
+        if sum(digits) != target_sum:
+            return False
+        base = mk_adrs(layer, idx_tree, ADRS_WOTS, idx_leaf, 0, 0, 0)
+        tops = [ch_hash(seed, set_ci(base, i), rd(off + i * n), digits[i], w - 1 - digits[i]) for i in range(l)]
+        wots_pk = th_multi(seed, mk_adrs(layer, idx_tree, ADRS_WOTS_PK, idx_leaf, 0, 0, 0), tops)
+        auth_off = off + l * n + 4
+        node = wots_pk
+        m_idx = idx_leaf
+        for hh in range(subtree_h):
+            sib = rd(auth_off + hh * n)
+            parent = m_idx >> 1
+            adrs = mk_adrs(layer, idx_tree, ADRS_TREE, 0, 0, hh + 1, parent)
+            node = th_pair(seed, adrs, node, sib) if (m_idx & 1) == 0 else th_pair(seed, adrs, sib, node)
+            m_idx = parent
+        current = node
+        off = auth_off + subtree_h * n
+    return current == root
+
+
 def sign_variant(variant_name, message_int, seed=None, sk_seed=None, pk_root=None):
     cfg = VARIANTS[variant_name]
     d = cfg["d"]
@@ -592,6 +793,9 @@ def sign_variant(variant_name, message_int, seed=None, sk_seed=None, pk_root=Non
     scheme = cfg["scheme"]
     h = cfg["h"]
     sig_size = cfg["sig_size"]
+
+    global HASH_BACKEND
+    HASH_BACKEND = cfg.get("hash", "keccak")
 
     if seed is None or sk_seed is None:
         seed, sk_seed = derive_keys(message_int)
@@ -612,16 +816,14 @@ def sign_variant(variant_name, message_int, seed=None, sk_seed=None, pk_root=Non
     # STEP 2: Grind R
     # ================================================================
     if scheme == "fors":
-        R, digest = grind_R_fors(seed, sk_seed, pk_root, message_int, k, a)
+        R, digest = grind_R_fors(seed, sk_seed, pk_root, message_int, k, a, cfg)
     else:
         R, digest = grind_R_pors(seed, sk_seed, pk_root, message_int, k, tree_height, m_max)
 
     # ================================================================
     # STEP 3: Decompose hypertree path
     # ================================================================
-    ht_shift = k * a
-    ht_mask = (1 << h) - 1
-    htIdx = (digest >> ht_shift) & ht_mask
+    htIdx = _field(digest, k * a, h, cfg)
 
     path_info = []
     idx_tree = htIdx
@@ -754,6 +956,11 @@ def sign_variant(variant_name, message_int, seed=None, sk_seed=None, pk_root=Non
 
     assert len(sig) == sig_size, f"Sig size: {len(sig)} != {sig_size}"
     eprint(f"  Signature: {len(sig)} bytes")
+
+    if scheme == "fors":
+        assert verify_c_series(seed, pk_root, message_int, sig, cfg), \
+            "Self-check failed: verify_c_series rejected the signature"
+        eprint("  Self-check (verify_c_series) OK.")
 
     return seed, pk_root, sig
 
