@@ -49,12 +49,14 @@ visual/*/dist/
 
 # sphincsplus C fork build artifacts
 signers/sphincsplus-128-24/*.o
+signers/sphincsplus-128-24/*.d
 signers/sphincsplus-128-24/slhdsa-sha2-128-24
 signers/sphincsplus-128-24/.cache/
 signers/sphincsplus-128-24/__pycache__/
 
 # jardin-keccak C fork build artifacts
 signers/jardin-keccak-128-24/*.o
+signers/jardin-keccak-128-24/*.d
 signers/jardin-keccak-128-24/jardin-keccak-128-24
 signers/jardin-keccak-128-24/.cache/
 signers/jardin-keccak-128-24/__pycache__/

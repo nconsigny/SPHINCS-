@@ -32,6 +32,40 @@ SIG_LEN = 3856
 
 def eprint(*a, **kw): print(*a, file=sys.stderr, **kw)
 
+def assert_binary_fresh(allow_stale=False):
+    """Refuse to run a C binary older than the sources it was built from.
+
+    The binary is gitignored, so a working tree easily carries sources newer than
+    the last local `make`. That has bitten: ec5aae3 made this signer
+    hedged-by-default — reshaping its argv — and fixed FORS parsing to MSB-first,
+    but a binary built three weeks earlier stayed on disk. The wrapper passed
+    `--hedged`, the old argv layout read that flag as the seed, and every SLH-DSA
+    FFI test failed with "bad seed hex (need 48 bytes)" for six weeks. CI never
+    saw it, because CI runs `make` before `forge test`.
+
+    The crash was the lucky outcome. Parameters and CLI shape are compile-time
+    here, so a stale binary can just as easily sign under the *wrong scheme* with
+    no error at all — the same rebuild also picked up the FORS MSB-first change.
+    So fail closed rather than hand the mismatch to the binary.
+    """
+    src_dir = os.path.dirname(BIN_PATH)
+    bin_mtime = os.path.getmtime(BIN_PATH)
+    newer = sorted(
+        f for f in os.listdir(src_dir)
+        if (f.endswith((".c", ".h")) or f == "Makefile")
+        and os.path.getmtime(os.path.join(src_dir, f)) > bin_mtime
+    )
+    if not newer:
+        return
+    shown = ", ".join(newer[:6]) + (" ..." if len(newer) > 6 else "")
+    eprint(f"  STALE C binary: {os.path.relpath(BIN_PATH, REPO_ROOT)}")
+    eprint(f"  {len(newer)} source file(s) newer than it: {shown}")
+    eprint(f"  Rebuild:  make -C {os.path.relpath(src_dir, REPO_ROOT)}")
+    if allow_stale:
+        eprint("  --allow-stale-binary given: using it anyway.")
+        return
+    sys.exit(1)
+
 def hmac512(key, msg):
     return hmac.new(key, msg, hashlib.sha512).digest()
 
@@ -87,6 +121,11 @@ def main():
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--hedged", action="store_true",
                    help="(default) Force hedged mode even if sig_counter is given.")
+    p.add_argument("--allow-stale-binary", action="store_true",
+                   help="Use the C binary even when its sources are newer — only for "
+                        "deliberately reproducing an old vector. Off by default: "
+                        "parameters and CLI shape are compile-time, so a stale binary "
+                        "can sign under the wrong scheme without erroring.")
     args = p.parse_args()
 
     if not args.hedged and args.sig_counter is None:
@@ -96,6 +135,7 @@ def main():
         eprint(f"  C binary not found at {BIN_PATH}")
         eprint(f"  Build with:  (cd signers/sphincsplus-128-24 && make)")
         sys.exit(1)
+    assert_binary_fresh(args.allow_stale_binary)
 
     master_sk = bytes.fromhex(args.master_sk_hex.removeprefix("0x"))
     if len(master_sk) != 32:

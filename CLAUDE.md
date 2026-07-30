@@ -25,7 +25,14 @@ forge build                                             # compile all contracts
 forge test                                              # run all forge tests
 cd signer-wasm && cargo test --release -- --ignored     # Rust C-series signer (9/9)
 
-# SLH-DSA-128-24 fast C signers (one-time build; ~11 min per NIST-params sign):
+# SLH-DSA-128-24 fast C signers (one-time build; ~11 min per NIST-params sign).
+# The binaries are gitignored, so a fresh checkout has none and a stale checkout
+# has an old one. Both fast-signer wrappers refuse to run a binary older than any
+# .c/.h/Makefile beside it (exit 1, naming the files and the make command) —
+# parameters and CLI shape are compile-time, so a stale binary can sign under the
+# wrong scheme with no error. Override only to reproduce an old vector on purpose:
+# --allow-stale-binary. The Makefiles carry -MMD -MP, so a header edit really does
+# trigger a rebuild.
 (cd signers/sphincsplus-128-24  && make)
 (cd signers/jardin-keccak-128-24 && make)
 
