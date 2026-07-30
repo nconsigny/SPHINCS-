@@ -41,7 +41,7 @@ contract SphincsC12BlakeTest is Test {
     }
 
     function testC12BlakeVerifyValid() public view {
-        assertEq(cachedSig.length, 6512, "sig length");
+        assertEq(cachedSig.length, 6592, "sig length");
         assertTrue(_verifySilent(cachedSeed, cachedRoot, MSG, cachedSig), "valid sig must verify");
     }
 
@@ -59,5 +59,11 @@ contract SphincsC12BlakeTest is Test {
 
     function testC12BlakeRejectsWrongRoot() public view {
         assertFalse(_verifySilent(cachedSeed, bytes32(uint256(cachedRoot) ^ 1), MSG, cachedSig));
+    }
+
+    function testC12BlakeRejectsLegacy42ChainSigLength() public {
+        bytes memory bad = new bytes(6512);
+        vm.expectRevert(bytes("Invalid sig length"));
+        verifier.verify(cachedSeed, cachedRoot, MSG, bad);
     }
 }

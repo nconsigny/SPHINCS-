@@ -25,7 +25,7 @@ There are different ways to construct the SPHINCS signature scheme. Existing lit
 | **C10** | WOTS+C / FORS+C | 18 | 2 | 11 | 13 | 8 | 43 | 205 | 4,008 B | 609 K | 115 K | 203 K | 308 K | 128 | 128 | 128 | 104.5 |
 | **C11** | WOTS+C / FORS+C | 16 | 2 | 11 | 13 | 8 | 43 | 203 | 3,976 B | 292 K | 116 K | 202 K | 308 K | 128 | 128 | 104.5 | 86.1 |
 | **C13** † | WOTS+C / FORS+C | 22 | 2 | 19 | 7 | 8 | 43 | 208 | 3,688 B | ~10 M | **105 K** | **188 K** | **293 K** | 128 | 128 | 128 | 128 |
-| **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 45 | - | 6,512 B | 36.6 K | 276 K | - | - | 128 | 127.8 | 109.1 | 95.4 |
+| **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 46 | - | 6,592 B | ~37.3 K | ~726 K | - | - | 128 | 127.8 | 109.1 | 95.4 |
 | **SLH-DSA-SHA2-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~142 K | - | - | 128 | 128 | 128 | 128 |
 | **SLH-DSA-Keccak-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~94 K | - | - | 128 | 128 | 128 | 128 |
 
@@ -38,19 +38,24 @@ There are different ways to construct the SPHINCS signature scheme. Existing lit
 - **4337**: total ERC-4337 `handleOps` tx gas (Sepolia). The 4337 wiring for C7 / C11 lives in `SphincsAccount` + `SphincsAccountFactory`; no SLH-DSA or C12 account exists here yet.
 - **†**: C13 uses the **FIPS 205 §4.2 uncompressed 32-byte ADRS layout** with keccak256, not JARDIN's. First verifier on the FIPS address layout (see the *Address layout* subsection below).
 
+> **C12 compatibility note:** the 2026-07-30 correction from `l=45` to
+> `l=46` changes both signature encoding and WOTS/XMSS public keys. Existing
+> C12 signatures and `pkRoot` values must be regenerated; an account cannot
+> migrate by replacing only its verifier.
+
 ### C13 vs the rest of the family: what changes
 
 C13's parameter choice (`h=22 d=2 a=19 k=7 w=8`) was built around three goals: smallest signature, cheapest verify at full 128-bit security across the signature-count window, FIPS-aligned address layout. The numbers above bear out the design:
 
 | Property                       | C7      | C11     | **C13** | C12     | SLH-DSA-SHA2-128-24 | SLH-DSA-Keccak-128-24 |
 |--------------------------------|---------|---------|---------|---------|---------------------|-----------------------|
-| Sig size                       | 3,704 B | 3,976 B | **3,688 B** ← smallest | 6,512 B | 3,856 B | 3,856 B |
-| Pure-asm verify                | 127 K   | 116 K   | **105 K** ← cheapest at sec_20=128 | 276 K | 142 K | 94 K |
+| Sig size                       | 3,704 B | 3,976 B | **3,688 B** ← smallest | 6,592 B | 3,856 B | 3,856 B |
+| Pure-asm verify                | 127 K   | 116 K   | **105 K** ← cheapest at sec_20=128 | 726 K | 142 K | 94 K |
 | Frame tx total (ethrex)        | 210 K   | 202 K   | **188 K** | n/a | n/a | n/a |
 | 4337 handleOps total (Sepolia) | 318 K   | 308 K   | **293 K** | n/a | n/a | n/a |
 | Signature-count cap            | 2²⁴     | 2¹⁶     | 2²²     | 2²⁰ (h=20, d=5) | 2²⁴ ‡ | 2²⁴ ‡ |
 | Security at the cap            | 128 bit | 86 bit  | **128 bit** | 95 bit | 128 bit § | 128 bit § |
-| Hash-call cost / sign (cold)   | 4.3 M   | 292 K   | ~10 M   | 36.6 K | ~1.07 B | ~1.07 B |
+| Hash-call cost / sign (cold)   | 4.3 M   | 292 K   | ~10 M   | ~37.3 K | ~1.07 B | ~1.07 B |
 | ADRS layout                    | **FIPS uncompressed** | **FIPS uncompressed** | **FIPS uncompressed** | **FIPS uncompressed** | FIPS ADRSc | JARDIN |
 
 ‡ **SLH-DSA-*-128-24 cap is a usage cap, not a leaf budget.** h=22, d=1 ⇒ a single XMSS tree of 2²² WOTS leaves; the leaf is chosen pseudorandomly per message, so by 2²⁴ signatures leaves have been reused ~4× on average (and birthday collisions begin ~2¹¹). Unlike C7/C13, whose 2²⁴/2²² figures are the actual hypertree-leaf counts at full one-time-WOTS security, the SLH "2²⁴" exceeds its 2²² leaf space by design.
@@ -61,13 +66,13 @@ Reading the table:
 
 - **vs C7**: C13 holds full 128-bit security up to its 2²² cap (vs C7's 2²⁴), but verifies in **105 K vs 127 K** (~17 % cheaper) and signs roughly half the hashes. Trade-off: half the signature-count budget per key. Good fit when keys rotate often or the per-key budget is bounded by policy.
 - **vs C11**: Same security at sec_14 (128 bit), but C11 collapses to 86 bit at sec_20. C13 holds 128 bit all the way to sec_20. Cost: ~30× higher signer hash count (C13's a=19 FORS trees vs C11's a=11), but **cheapest verify in the C-series**.
-- **vs C12** (plain SPHINCS+ without counter grinding): C13 verifies ~2.6× cheaper for a comparable security envelope, with a sig that's ~44 % smaller. C12 wins decisively on signer cost (it has no counter-grinding step at all), so C12 stays the right pick for tightly-constrained signers (e.g. secure-element keys). C13 is the right pick when verify gas matters more than signer time.
+- **vs C12** (plain SPHINCS+ without counter grinding): C13 verifies ~6.9× cheaper for a comparable security envelope, with a sig that's ~44 % smaller. C12 wins decisively on signer cost (it has no counter-grinding step at all), so C12 stays the right pick for tightly-constrained signers (e.g. secure-element keys). C13 is the right pick when verify gas matters more than signer time.
 - **vs SLH-DSA-SHA2-128-24** (NIST-compliant standalone): C13 is roughly **same sig size** (-4 %) and **~25 % cheaper to verify**, with ~100× lower signer cost. The trade is that SLH-DSA is the FIPS 205 NIST-blessed parameter set; C13 is a research parameter choice in the ePrint 2025/2203 family. C13's ADRS layout now matches FIPS to keep cross-impl porting clean.
 - **Smallest signature** of any variant in the repo. The combination `k=7, a=19` with the 4 B count tail and 11-level subtree gives the leanest payload.
 
 The takeaway: **C13 is the cheapest verifier in the repo at 128-bit security up to a 2²² sig cap**, and the smallest signature. The cost is sign-time, which is ~30× C11 and ~2× C7. For an Ethereum smart account that signs occasionally and is verified by everyone, that asymmetry is the right shape.
 
-C11 and C12 are light enough to run on a hardware wallet, 390s and 47.5s signature times on a ST33K1M5 secure element (Ledger nano S+). C12 has the lowest hardware signer cost of all (36 K hashes - plain SPX with d=5 hypertree skips most tree-hash work) at the price of a 6,512-byte sig. SLH-DSA-SHA2-128-24 is the FIPS-aligned alternative: much larger signer cost even on a desktop-class signer that caches the XMSS tree (~200 M hashes / sig, dominated by FORS, which can't be cached because the leaf-index to FORS-tree-address mapping changes with every message), and ~1.07 B / sig on a zero-memory signer that has to rebuild the 2²²-leaf XMSS for every auth path. 128-bit security across the 2²⁴ usage window is carried by the FORS few-time layer absorbing the expected pseudorandom WOTS-leaf reuse over the 2²² leaf space (‡/§ above; [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md)), not by one-time WOTS use. The SHA-2 verifier implements **FIPS 205 *external* SLH-DSA.Verify with an empty context** (M wrapped as `0x00‖0x00‖M` before H_msg), so it matches published NIST/ACVP external KAT vectors. The Keccak twin trades bit-exact NIST compliance for ~34 % cheaper on-chain verification (but not a very interesting trade-off as it keeps the same signer cost).
+C11 and C12 are light enough to run on a hardware wallet, 390s and 47.5s signature times on a ST33K1M5 secure element (Ledger nano S+). C12 has the lowest hardware signer cost of all (~37 K hashes - plain SPX with d=5 hypertree skips most tree-hash work) at the price of a 6,592-byte sig. SLH-DSA-SHA2-128-24 is the FIPS-aligned alternative: much larger signer cost even on a desktop-class signer that caches the XMSS tree (~200 M hashes / sig, dominated by FORS, which can't be cached because the leaf-index to FORS-tree-address mapping changes with every message), and ~1.07 B / sig on a zero-memory signer that has to rebuild the 2²²-leaf XMSS for every auth path. 128-bit security across the 2²⁴ usage window is carried by the FORS few-time layer absorbing the expected pseudorandom WOTS-leaf reuse over the 2²² leaf space (‡/§ above; [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md)), not by one-time WOTS use. The SHA-2 verifier implements **FIPS 205 *external* SLH-DSA.Verify with an empty context** (M wrapped as `0x00‖0x00‖M` before H_msg), so it matches published NIST/ACVP external KAT vectors. The Keccak twin trades bit-exact NIST compliance for ~34 % cheaper on-chain verification (but not a very interesting trade-off as it keeps the same signer cost).
 
 ## Stateless SPHINCs- Architecture
 
@@ -93,7 +98,7 @@ SHA-256 + 22-byte ADRSc versions of the keccak verifiers, for deployments that p
 | **C10-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 4,008 B | ~475 K |
 | **C11-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 3,976 B | ~473 K |
 | **C13-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 3,688 B | ~440 K |
-| **C12-SHA** | plain SPHINCS+, full FIPS 205 SLH-DSA-SHA2 (MGF1 H_msg, `0x00‖0x00` envelope, standard checksum) | Algorithm yes; params not a NIST set (no KAT) | 6,496 B | ~908 K |
+| **C12-SHA** | plain SPHINCS+, full FIPS 205 SLH-DSA-SHA2 (MGF1 H_msg, `0x00‖0x00` envelope, standard checksum) | Algorithm yes; params not a NIST set (no KAT) | 6,576 B | ~942 K |
 
 The compact twins (C10/C11/C13) **cannot** be made FIPS-compliant — their WOTS+C/FORS+C counter-grinding has no FIPS 205 analog — so they only borrow the SHA-256 hash + ADRSc. C12 is plain SPHINCS+, so it takes the full FIPS algorithm. Vectors: `script/signer.py {c10-sha,c11-sha,c13-sha}` and `script/slh_dsa_sha2_c12_signer.py`.
 

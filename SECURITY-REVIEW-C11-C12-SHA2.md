@@ -7,6 +7,12 @@
 > branch's Foundry suite). It has **not** been signed off by a human security professional. The
 > code remains **not audited, not production-safe** (per `CLAUDE.md`). Companion to the prior
 > `SECURITY-REVIEW-C13-SLHDSA.md`.
+>
+> **Resolution note (2026-07-30):** L-03 is fixed in all current C12 on-chain
+> backends. Keccak, SHA-2, and BLAKE2b now use `len1=43`, `len2=3`, `l=46`;
+> their 43rd message digit binds the final two node bits with one zero pad bit.
+> This is a breaking key/signature-format change: existing C12 roots and
+> signatures must be regenerated.
 
 ## 1. Scope
 

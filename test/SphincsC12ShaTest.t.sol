@@ -42,7 +42,7 @@ contract SphincsC12ShaTest is Test {
     }
 
     function testC12ShaVerifyValid() public view {
-        assertEq(cachedSig.length, 6496, "C12-SHA sig must be 6496 bytes");
+        assertEq(cachedSig.length, 6576, "C12-SHA sig must be 6576 bytes");
         assertTrue(_verifySilent(cachedSeed, cachedRoot, MSG, cachedSig), "C12-SHA signature should be valid");
     }
 
@@ -60,5 +60,11 @@ contract SphincsC12ShaTest is Test {
     function testC12ShaRejectsWrongRoot() public view {
         bytes32 wrongRoot = bytes32(uint256(cachedRoot) ^ (1 << 200));
         assertFalse(_verifySilent(cachedSeed, wrongRoot, MSG, cachedSig), "wrong root must not verify");
+    }
+
+    function testC12ShaRejectsLegacy42ChainSigLength() public {
+        bytes memory bad = new bytes(6496);
+        vm.expectRevert(bytes("Invalid sig length"));
+        verifier.verify(cachedSeed, cachedRoot, MSG, bad);
     }
 }

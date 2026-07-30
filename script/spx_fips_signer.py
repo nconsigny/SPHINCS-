@@ -3,12 +3,11 @@
 SPX FIPS signer — plain SPHINCS+ (C12) on the FIPS 205 §4.2 uncompressed
 32-byte ADRS.
 
-This is the FIPS-layout twin of `jardin_spx_signer.py`. The signing algorithm,
-parameters, hash shapes, digest parsing and signature byte layout are identical;
-only the ADRS word positions differ. We reuse the shared signer verbatim and
-swap its ADRS constructor for the FIPS one — Python resolves `make_adrs` as a
-module global at call time, so every call site (WOTS, XMSS, FORS, and the
-signer's own self-check verifier) picks up the FIPS layout.
+This is the FIPS-layout twin of `jardin_spx_signer.py`. We reuse the shared
+implementation, configure the corrected C12 WOTS+ width (l1=43, l2=3, l=46),
+and swap its ADRS constructor for the FIPS one. Python resolves these values and
+`make_adrs` as module globals at call time, so every call site (WOTS, XMSS,
+FORS, and the signer's own self-check verifier) picks up the C12 layout.
 
 The shared `jardin_spx_signer.py` is intentionally left untouched because it is
 cross-referenced verbatim by the nconsigny/JARDIN repo (as JardinSpxVerifier).
@@ -23,6 +22,15 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import jardin_spx_signer as spx
+
+# The legacy shared module retains the historical 42-chain JARDIN parameters.
+# Current on-chain C12 covers all 128 message bits with 43 base-8 digits.
+spx.L1 = 43
+spx.L2 = 3
+spx.L = spx.L1 + spx.L2
+spx.HT_LAYER_LEN = spx.L * spx.N + spx.H_PRIME * spx.N
+spx.HT_LEN = spx.D * spx.HT_LAYER_LEN
+spx.SIG_LEN = spx.R_LEN + spx.FORS_BODY_LEN + spx.HT_LEN
 
 
 def make_adrs_fips(layer, tree, atype, kp, ci, cp, ha):

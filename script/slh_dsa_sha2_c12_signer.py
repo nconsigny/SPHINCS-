@@ -13,9 +13,9 @@ w=8 WOTS. NOT a NIST parameter set (params differ from the 12 standardized sets)
 so it won't match published KATs — it's a true SLH-DSA *algorithm* at research
 params. Drives src/sha/SPHINCs-C12-SHA.sol.
 
-Parameters: n=16 h=20 d=5 h'=4 a=7 k=20 w=8 (lgw=3) l1=42 l2=3 l=45, m=21.
-Signature layout (6,512 B): R(16) | FORS 20×(sk 16 + auth 7·16)=2560 |
-                            HT 5×(WOTS 45·16 + XMSS auth 4·16)=3920
+Parameters: n=16 h=20 d=5 h'=4 a=7 k=20 w=8 (lgw=3) l1=43 l2=3 l=46, m=21.
+Signature layout (6,576 B): R(16) | FORS 20×(sk 16 + auth 7·16)=2560 |
+                            HT 5×(WOTS 46·16 + XMSS auth 4·16)=4000
 
 Usage: python3 script/slh_dsa_sha2_c12_signer.py <master_sk_hex> <message_hex> [sig_counter]
 Output: ABI-encoded (bytes32 seed, bytes32 root, bytes sig) hex on stdout.
@@ -31,9 +31,9 @@ A = 7
 K = 20
 W = 8
 LOG_W = 3
-L1 = 42
+L1 = 43
 L2 = 3
-L = 45
+L = 46
 M_LEN = ((K * A + 7) // 8) + ((H - H_PRIME + 7) // 8) + ((H_PRIME + 7) // 8)  # 18+2+1 = 21
 R_LEN = N
 
@@ -104,7 +104,9 @@ def wots_checksum(md):
     return base_2b((csum << shift).to_bytes(csum_bytes, "big"), LOG_W, L2)
 
 def wots_digits(M):
-    md = base_2b(M, LOG_W, L1)
+    # lg(w)=3 does not divide 8*n=128. Append zero padding so digit 42
+    # contains the final two message bits followed by one zero bit.
+    md = base_2b(M + b"\x00", LOG_W, L1)
     return md + wots_checksum(md)
 
 def wots_secret(ps, ss, layer, tree, kp, chain_i):

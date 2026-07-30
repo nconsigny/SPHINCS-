@@ -4,7 +4,7 @@
 pragma solidity ^0.8.28;
 
 /// @title SPHINCs_C12ShaAsm — full FIPS 205 SLH-DSA-SHA2 at the C12 parameter set
-/// @notice C12: plain SPHINCS+ n=16 h=20 d=5 h'=4 a=7 k=20 w=8 l=45. Sig 6,496 B.
+/// @notice C12: plain SPHINCS+ n=16 h=20 d=5 h'=4 a=7 k=20 w=8 l=46. Sig 6,576 B.
 /// @dev    The SHA-2 twin of the keccak C12 (src/SPHINCs-C12Asm.sol). Because C12
 ///         is plain SPHINCS+, it takes the FULL FIPS 205 SHA-2 instantiation
 ///         (unlike the WOTS+C/FORS+C compact twins which only borrow the hash):
@@ -13,12 +13,12 @@ pragma solidity ^0.8.28;
 ///           • MGF1-SHA-256 H_msg with the 0x00‖0x00 empty-context envelope
 ///             (external SLH-DSA.Verify), identical to src/SLH-DSA-SHA2-128-24verifier.sol
 ///           • MSB-first base_2b digit/index parsing (FIPS 205 Algorithm 4)
-///           • standard WOTS+ checksum (l1=42 message + l2=3 checksum digits)
+///           • standard WOTS+ checksum (l1=43 message + l2=3 checksum digits)
 ///         It is a true SLH-DSA *algorithm* at research params (NOT one of the 12
 ///         NIST sets, so it matches no published KAT). Vectors:
 ///         script/slh_dsa_sha2_c12_signer.py.
 ///
-///         R is n=16 bytes on the wire (FIPS), so the signature is 6,496 B — 16 B
+///         R is n=16 bytes on the wire (FIPS), so the signature is 6,576 B — 16 B
 ///         shorter than the keccak C12 (which used a 32-byte randomizer).
 ///         ADRSc bit offsets (see src/sha/SPHINCs-C11-SHA.sol): layer 248, tree 184,
 ///         type 176, word1 144, word2 112, word3 80.
@@ -30,7 +30,7 @@ contract SPHINCs_C12ShaAsm {
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
-            if iszero(eq(sig.length, 6496)) {
+            if iszero(eq(sig.length, 6576)) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
@@ -119,13 +119,14 @@ contract SPHINCs_C12ShaAsm {
 
             for { let layer := 0 } lt(layer, 5) { layer := add(layer, 1) } {
                 // WOTS+ digits from currentNode (MSB-first base_2b, w=8):
-                //   msg digit i (i=0..41) = (currentNode >> (253 - 3i)) & 7
+                //   msg digit i (i=0..42) = (currentNode >> (253 - 3i)) & 7
+                //   digit 42 contains the final two message bits plus one zero pad bit
                 //   csum = Σ (7 - digit); csum_digit j (j=0..2) = (csum<<7 >> (13 - 3j)) & 7
                 let wotsBase := or(shl(248, layer), or(shl(184, curTree), shl(144, curLeaf)))
                 let wotsPtr := add(sigBase, sigOff)
 
                 let csum := 0
-                for { let i := 0 } lt(i, 42) { i := add(i, 1) } {
+                for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
                     let digit := and(shr(sub(253, mul(3, i)), currentNode), 7)
                     csum := add(csum, sub(7, digit))
                     let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
@@ -142,7 +143,7 @@ contract SPHINCs_C12ShaAsm {
                 let csumShifted := shl(7, csum)
                 for { let j := 0 } lt(j, 3) { j := add(j, 1) } {
                     let digit := and(shr(sub(13, mul(3, j)), csumShifted), 7)
-                    let i := add(42, j)
+                    let i := add(43, j)
                     let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
                     let chainBase := or(wotsBase, shl(112, i))
                     let steps := sub(7, digit)
@@ -155,16 +156,16 @@ contract SPHINCs_C12ShaAsm {
                     mstore(add(0x100, shl(5, i)), val)
                 }
 
-                // WOTS_PK compress (T_l over 45 tops). input = 16+48+22+45*16 = 806 = 0x326
+                // WOTS_PK compress (T_l over 46 tops). input = 16+48+22+46*16 = 822 = 0x336
                 mstore(0x40, or(shl(248, layer), or(shl(184, curTree), or(shl(176, 1), shl(144, curLeaf)))))
-                for { let i := 0 } lt(i, 45) { i := add(i, 1) } {
+                for { let i := 0 } lt(i, 46) { i := add(i, 1) } {
                     mstore(add(0x56, shl(4, i)), mload(add(0x100, shl(5, i))))
                 }
-                if iszero(staticcall(gas(), 0x02, 0x00, 0x326, 0x340, 0x20)) { revert(0, 0) }
+                if iszero(staticcall(gas(), 0x02, 0x00, 0x336, 0x340, 0x20)) { revert(0, 0) }
                 let wotsPk := and(mload(0x340), N_MASK)
 
                 // XMSS climb (h' = 4). TREE: type=2, layer, tree=curTree.
-                let authOff := add(sigOff, 720)   // 45*16
+                let authOff := add(sigOff, 736)   // 46*16
                 let treeAdrs := or(shl(248, layer), or(shl(184, curTree), shl(176, 2)))
                 let merkleNode := wotsPk
                 let mIdx := curLeaf

@@ -9,9 +9,8 @@ pragma solidity ^0.8.28;
 ///      checksum and standard FORS — a hypertree of depth d=5, per-layer XMSS
 ///      height h'=4.
 ///
-///      Parameters: n=16, h=20, d=5, h'=4, a=7, k=20, w=8, l=45.
-///      6,512 B signature, ~36.6K keccak calls to sign, ~717K verify
-///      (measured: test/SphincsC12Test.t.sol::testC12VerifyGas).
+///      Parameters: n=16, h=20, d=5, h'=4, a=7, k=20, w=8, l=46.
+///      6,592 B signature.
 ///
 ///      Migrated from the JARDIN 32-byte ADRS to the FIPS 205 §4.2
 ///      uncompressed 32-byte ADRS + keccak256 (the canonical keccak-family
@@ -25,7 +24,7 @@ pragma solidity ^0.8.28;
 ///      Hash primitives (all keccak256 truncated to 16B):
 ///        F     : keccak(seed32 ‖ adrs32 ‖ M32)                      96 B
 ///        H     : keccak(seed32 ‖ adrs32 ‖ L32 ‖ R32)               128 B
-///        T_l   : keccak(seed32 ‖ adrs32 ‖ v0..v44  (45 × 32B))    1,504 B
+///        T_l   : keccak(seed32 ‖ adrs32 ‖ v0..v45  (46 × 32B))    1,536 B
 ///        T_k   : keccak(seed32 ‖ adrs32 ‖ r0..r19  (20 × 32B))      704 B
 ///        Hmsg  : keccak(seed32 ‖ root32 ‖ R32 ‖ msg32 ‖ dom32)      160 B
 ///                where dom = 0xFF..FC (distinct from C11/T0/plain-FORS)
@@ -39,9 +38,9 @@ pragma solidity ^0.8.28;
 ///        type 3 FORS_TREE    word1=kp  word2=height         word3=tree_index
 ///        type 4 FORS_ROOTS   word1=kp  word2=0              word3=0
 ///
-///      Signature layout (6,512 bytes, constant):
+///      Signature layout (6,592 bytes, constant):
 ///        R(32) ‖ FORS(k=20 × (sk 16B + auth 7×16B)) = 2,560
-///              ‖ Hypertree(d=5 layers × (WOTS 45×16B + XMSS auth 4×16B)) = 3,920
+///              ‖ Hypertree(d=5 layers × (WOTS 46×16B + XMSS auth 4×16B)) = 4,000
 contract SPHINCs_C12Asm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
@@ -57,7 +56,7 @@ contract SPHINCs_C12Asm {
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
-            if iszero(eq(sig.length, 6512)) {
+            if iszero(eq(sig.length, 6592)) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
@@ -155,7 +154,8 @@ contract SPHINCs_C12Asm {
 
             for { let layer := 0 } lt(layer, 5) { layer := add(layer, 1) } {
                 // WOTS+ digits from currentNode (128-bit value in high 16B of word).
-                //   msg_digit[i] (i=0..41) = (node >> (128 + 3i)) & 7   — LSB-first
+                //   msg_digit[i] (i=0..42) = (node >> (128 + 3i)) & 7   — LSB-first
+                //   digit 42 contains the final two message bits plus one zero pad bit
                 //   csum = Σ (7 - digit[i])
                 //   csum_digit[j] (j=0..2) = (csum_shifted >> (13 - 3j)) & 7  (MSB-first, SLH-DSA)
 
@@ -165,8 +165,8 @@ contract SPHINCs_C12Asm {
 
                 let csum := 0
 
-                // ── 42 message-digit chains ──
-                for { let i := 0 } lt(i, 42) { i := add(i, 1) } {
+                // ── 43 message-digit chains ──
+                for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
                     let digit := and(shr(add(128, mul(3, i)), currentNode), 7)
                     csum := add(csum, sub(7, digit))
 
@@ -183,11 +183,11 @@ contract SPHINCs_C12Asm {
                     mstore(add(0x80, shl(5, i)), val)
                 }
 
-                // ── 3 checksum chains (i = 42, 43, 44) ──
+                // ── 3 checksum chains (i = 43, 44, 45) ──
                 let csumShifted := shl(7, csum)
                 for { let j := 0 } lt(j, 3) { j := add(j, 1) } {
                     let digit := and(shr(sub(13, mul(3, j)), csumShifted), 7)
-                    let i := add(42, j)
+                    let i := add(43, j)
                     let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
                     let chainBase := or(wotsBase, shl(32, i))
                     let steps := sub(7, digit)
@@ -199,20 +199,20 @@ contract SPHINCs_C12Asm {
                     mstore(add(0x80, shl(5, i)), val)
                 }
 
-                // ── WOTS_PK compression via T_l (45 chain outputs) ──
-                // total = seed(32) + adrs(32) + 45*32 = 1504 = 0x5E0
+                // ── WOTS_PK compression via T_l (46 chain outputs) ──
+                // total = seed(32) + adrs(32) + 46*32 = 1536 = 0x600
                 {
                     let pkAdrs := or(or(shl(224, layer), shl(128, curTree)),
                                       or(shl(96, 1), shl(64, curLeaf)))
                     mstore(0x20, pkAdrs)
-                    for { let i := 0 } lt(i, 45) { i := add(i, 1) } {
+                    for { let i := 0 } lt(i, 46) { i := add(i, 1) } {
                         mstore(add(0x40, shl(5, i)), mload(add(0x80, shl(5, i))))
                     }
                 }
-                let wotsPk := and(keccak256(0x00, 0x5E0), N_MASK)
+                let wotsPk := and(keccak256(0x00, 0x600), N_MASK)
 
                 // ── XMSS auth climb (h' = 4) ──
-                let authOff := add(sigOff, 720)   // 45 × 16
+                let authOff := add(sigOff, 736)   // 46 × 16
                 let authPtr := add(sigBase, authOff)
                 // XMSS_TREE ADRS base: type=2, layer, tree=curTree, kp=0
                 let xmssBase := or(or(shl(224, layer), shl(128, curTree)), shl(96, 2))

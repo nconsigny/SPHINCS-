@@ -4,7 +4,7 @@
 pragma solidity ^0.8.28;
 
 /// @title SPHINCs_C12BlakeAsm — BLAKE2b twin of the plain-SPHINCS+ C12 verifier
-/// @notice C12: plain SPHINCS+ n=16 h=20 d=5 h'=4 a=7 k=20 w=8 l=45. Sig 6,512 B.
+/// @notice C12: plain SPHINCS+ n=16 h=20 d=5 h'=4 a=7 k=20 w=8 l=46. Sig 6,592 B.
 /// @dev    BLAKE2b twin of src/keccak/SPHINCs-C12Asm.sol — IDENTICAL plain-SPHINCS+
 ///         construction (standard WOTS+ checksum, d=5 hypertree, standard FORS, FIPS
 ///         205 §4.2 uncompressed 32-byte ADRS, same signature byte layout) with only
@@ -25,7 +25,7 @@ contract SPHINCs_C12BlakeAsm {
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
-            if iszero(eq(sig.length, 6512)) {
+            if iszero(eq(sig.length, 6592)) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
@@ -110,8 +110,9 @@ contract SPHINCs_C12BlakeAsm {
                 let wotsPtr := add(sigBase, sigOff)
                 let csum := 0
 
-                // 42 message-digit chains. digit i = (node >> (128 + 3i)) & 7 (LSB-first).
-                for { let i := 0 } lt(i, 42) { i := add(i, 1) } {
+                // 43 message-digit chains. Digit 42 carries the final two bits + one zero pad bit.
+                // digit i = (node >> (128 + 3i)) & 7 (LSB-first).
+                for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
                     let digit := and(shr(add(128, mul(3, i)), currentNode), 7)
                     csum := add(csum, sub(7, digit))
                     let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
@@ -125,11 +126,11 @@ contract SPHINCs_C12BlakeAsm {
                     mstore(add(0x80, shl(5, i)), val)
                 }
 
-                // 3 checksum chains (i = 42,43,44). csum<<7 then MSB-first 3-bit digits.
+                // 3 checksum chains (i = 43,44,45). csum<<7 then MSB-first 3-bit digits.
                 let csumShifted := shl(7, csum)
                 for { let j := 0 } lt(j, 3) { j := add(j, 1) } {
                     let digit := and(shr(sub(13, mul(3, j)), csumShifted), 7)
-                    let i := add(42, j)
+                    let i := add(43, j)
                     let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
                     let chainBase := or(wotsBase, shl(32, i))
                     let steps := sub(7, digit)
@@ -141,19 +142,19 @@ contract SPHINCs_C12BlakeAsm {
                     mstore(add(0x80, shl(5, i)), val)
                 }
 
-                // WOTS_PK compression (T_l over 45 chain tops): type=1. = 32+32+45*32 = 1504 = 0x5E0
+                // WOTS_PK compression (T_l over 46 chain tops): type=1. = 32+32+46*32 = 1536 = 0x600
                 {
                     let pkAdrs := or(or(shl(224, layer), shl(128, curTree)),
                                       or(shl(96, 1), shl(64, curLeaf)))
                     mstore(0x20, pkAdrs)
-                    for { let i := 0 } lt(i, 45) { i := add(i, 1) } {
+                    for { let i := 0 } lt(i, 46) { i := add(i, 1) } {
                         mstore(add(0x40, shl(5, i)), mload(add(0x80, shl(5, i))))
                     }
                 }
-                let wotsPk := blake2b(0x00, 0x5E0, 16)
+                let wotsPk := blake2b(0x00, 0x600, 16)
 
                 // XMSS auth climb (h' = 4): XMSS_TREE type=2, layer, tree=curTree.
-                let authOff := add(sigOff, 720) // 45 * 16
+                let authOff := add(sigOff, 736) // 46 * 16
                 let authPtr := add(sigBase, authOff)
                 let xmssBase := or(or(shl(224, layer), shl(128, curTree)), shl(96, 2))
                 let merkleNode := wotsPk

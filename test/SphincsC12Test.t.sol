@@ -7,7 +7,7 @@ import "forge-std/Test.sol";
 import "../src/keccak/SPHINCs-C12Asm.sol";
 
 /// @notice Verifier test for the migrated SPHINCs-C12Asm.sol — plain SPHINCS+
-///         (h=20, d=5, h'=4, a=7, k=20, w=8, l=45) now on the FIPS 205
+///         (h=20, d=5, h'=4, a=7, k=20, w=8, l=46) now on the FIPS 205
 ///         uncompressed 32-byte ADRS. Vectors come from script/spx_fips_signer.py
 ///         (the FIPS twin of jardin_spx_signer.py). The legacy JARDIN-layout C12
 ///         and its signer stay in legacy/ for the nconsigny/JARDIN repo.
@@ -44,7 +44,7 @@ contract SphincsC12Test is Test {
     }
 
     function testC12VerifyValid() public view {
-        assertEq(cachedSig.length, 6512, "sig length");
+        assertEq(cachedSig.length, 6592, "sig length");
         assertTrue(
             _verifySilent(cachedSeed, cachedRoot, MSG, cachedSig),
             "C12 signature should be valid"
@@ -68,7 +68,13 @@ contract SphincsC12Test is Test {
     }
 
     function testC12RejectsShortSig() public {
-        bytes memory bad = new bytes(6511);
+        bytes memory bad = new bytes(6591);
+        vm.expectRevert(bytes("Invalid sig length"));
+        verifier.verify(cachedSeed, cachedRoot, MSG, bad);
+    }
+
+    function testC12RejectsLegacy42ChainSigLength() public {
+        bytes memory bad = new bytes(6512);
         vm.expectRevert(bytes("Invalid sig length"));
         verifier.verify(cachedSeed, cachedRoot, MSG, bad);
     }

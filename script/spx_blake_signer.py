@@ -5,8 +5,9 @@ SPX BLAKE2b signer — plain SPHINCS+ (C12) on the FIPS 205 §4.2 uncompressed
 
 BLAKE2b twin of `spx_fips_signer.py`. The signing algorithm, parameters, digest
 parsing and signature byte layout are identical; we reuse the shared signer
-(`jardin_spx_signer.py`) verbatim and swap two things as module globals (resolved
-at call time):
+(`jardin_spx_signer.py`) and configure these module globals (resolved at call
+time):
+  * the corrected C12 WOTS+ width -> l1=43, l2=3, l=46;
   * `make_adrs`  -> the FIPS uncompressed 32-byte ADRS constructor; and
   * `F`, `H_`, `T_l`, `T_k`, `h_msg` -> BLAKE2b tweakable hashes.
 The PRFs (`wots_secret`, `fors_secret`, `derive_R`) keep keccak — they are
@@ -29,6 +30,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import jardin_spx_signer as spx
 from jardin_primitives import to_b32
+
+# The legacy shared module retains the historical 42-chain JARDIN parameters.
+# Current on-chain C12 covers all 128 message bits with 43 base-8 digits.
+spx.L1 = 43
+spx.L2 = 3
+spx.L = spx.L1 + spx.L2
+spx.HT_LAYER_LEN = spx.L * spx.N + spx.H_PRIME * spx.N
+spx.HT_LEN = spx.D * spx.HT_LAYER_LEN
+spx.SIG_LEN = spx.R_LEN + spx.FORS_BODY_LEN + spx.HT_LEN
 
 
 def make_adrs_fips(layer, tree, atype, kp, ci, cp, ha):
