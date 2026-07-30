@@ -18,8 +18,15 @@ contract SphincsAccount is BaseAccount {
     bytes32 public pkSeed;                   // SPHINCS+ public seed (rotatable)
     bytes32 public pkRoot;                   // SPHINCS+ Merkle root (rotatable)
 
+    /// @dev n=16 key shape: the 16-byte pkSeed / pkRoot occupy the TOP half of
+    ///      each word, low 128 bits zero — the same mask every verifier and the
+    ///      signer applies.
+    bytes32 private constant N_MASK =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000;
+
     error NotSelfOrEntryPoint();
     error NotEntryPoint();
+    error NonCanonicalKey();
 
     constructor(
         IEntryPoint ep,
@@ -28,11 +35,27 @@ contract SphincsAccount is BaseAccount {
         bytes32 _pkSeed,
         bytes32 _pkRoot
     ) {
+        _requireCanonicalKey(_pkSeed, _pkRoot);
         _entryPoint = ep;
         verifier = _verifier;
         owner = _owner;
         pkSeed = _pkSeed;
         pkRoot = _pkRoot;
+    }
+
+    /// @dev Reject a non-canonical key at the point it would be COMMITTED, not
+    ///      just when it is used. Every verifier reverts on a non-top-aligned
+    ///      pkSeed/pkRoot, so storing one permanently bricks the account:
+    ///      recovery would have to run `rotateKeys` through `execute` →
+    ///      EntryPoint → `_validateSignature`, and that path can never pass
+    ///      again once the stored key is unusable. Validating here also keeps
+    ///      `SphincsAccountFactory`'s CREATE2 salt canonical, so one logical key
+    ///      maps to exactly one account address.
+    function _requireCanonicalKey(bytes32 _pkSeed, bytes32 _pkRoot) private pure {
+        require(
+            (_pkSeed & N_MASK) == _pkSeed && (_pkRoot & N_MASK) == _pkRoot,
+            NonCanonicalKey()
+        );
     }
 
     function entryPoint() public view override returns (IEntryPoint) {
@@ -52,7 +75,10 @@ contract SphincsAccount is BaseAccount {
     /// @notice Rotate SPHINCS+ keys. Can only be called by the account itself
     ///         (via execute) or by the EntryPoint during a UserOp.
     function rotateKeys(bytes32 newPkSeed, bytes32 newPkRoot) external {
+        // Authorization first, so an unauthorized caller always gets
+        // NotSelfOrEntryPoint regardless of the key shape it passed.
         require(msg.sender == address(this) || msg.sender == address(entryPoint()), NotSelfOrEntryPoint());
+        _requireCanonicalKey(newPkSeed, newPkRoot);
         pkSeed = newPkSeed;
         pkRoot = newPkRoot;
     }

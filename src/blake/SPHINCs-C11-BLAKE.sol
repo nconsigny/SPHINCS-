@@ -1,31 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-/// @title SphincsC11Asm — Stateless SPHINCS+ C11 verifier (shared, Yul-optimized)
+/// @title SphincsC11BlakeAsm — BLAKE2b "minimal twin" of the C11 verifier
 /// @notice C11: W+C_F+C h=16 d=2 a=11 k=13 w=8 l=43 target_sum=203 sig=3976.
-///         Lightest C-series signer (~292 K hashes); security degrades to ~86 bit
-///         at a 2²⁰ signature cap, so prefer C13 when verify-time security matters.
-/// @dev    Migrated from the JARDIN 32-byte ADRS to the FIPS 205 §4.2 uncompressed
-///         32-byte ADRS + keccak256 (same layout as C7/C9/C13). The signature byte
-///         layout and hash structure are unchanged from the legacy verifier; only the
-///         ADRS word positions move (JARDIN's 8-byte tree → FIPS's 12-byte tree, and
-///         WOTS chain/hash from JARDIN ci(shl64)+cp(shl32) to FIPS word2(shl32)+word3(shl0)).
-///         FORS is keyed by the per-message hypertree leaf via the exact FIPS field
-///         split — tree=idxTree0, kp=idxLeaf0, tree_index folds in the FORS tree number
-///         ((forsTree<<(A-height))|node). Domain-separated H_msg (160 bytes).
-///         ADRS: layer(4) ‖ tree(12) ‖ type(4) ‖ word1 ‖ word2 ‖ word3.
-contract SphincsC11Asm {
+/// @dev    BLAKE2b twin of src/keccak/SPHINCs-C11Asm.sol — IDENTICAL construction
+///         (FIPS 205 §4.2 uncompressed 32-byte ADRS, WOTS+C/FORS+C, one-shot H_msg,
+///         forced-zero FORS tree, same signature byte layout) with only the hash
+///         primitive swapped: keccak256(seed‖adrs‖payload) -> BLAKE2b(...). BLAKE2b
+///         is built on the 0x09 (BLAKE2F) compression precompile by the blake2b()
+///         Yul kernel (see src/blake/SPHINCs-C13-BLAKE.sol for the kernel notes).
+///         F/H/T use nn=16; H_msg and the WOTS+C digest use nn=32. NOT FIPS
+///         (research "BLAKE flavour"). `view` (the precompile is a staticcall).
+///         Adds the canonical public-key guard the keccak C11 lacks (review C13-V-f1).
+///         Vectors: script/signer.py c11-blake (hash=blake2, adrs_mode=fips).
+contract SphincsC11BlakeAsm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
-        external pure returns (bool valid)
+        external view returns (bool valid)
     {
-        // NOTE: this block intentionally uses Solidity's free-memory-pointer slot
-        // (0x40) and the zero slot (0x60) as scratch and writes high memory without
-        // updating the FMP. That is only sound because every exit below is an
-        // unconditional in-assembly `return`/`revert`, so Solidity never regains
-        // control with a clobbered FMP. It is therefore NOT `memory-safe` in the
-        // Yul sense — do not add the ("memory-safe") annotation and do not introduce
-        // a normal (fall-through) exit from this block. (matches C13, review C13-evm-f1)
+        // Bare `assembly` (NOT memory-safe): the main block uses 0x40/0x60 as scratch
+        // and writes high memory; sound only because every exit is an in-assembly
+        // return/revert. The blake2b() kernel uses scratch at 0x800+ (clear of the
+        // SPHINCS+ working set, which tops out ~0x5E0) and reads preimages from 0x00.
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
@@ -36,12 +32,6 @@ contract SphincsC11Asm {
                 mstore(0x44, "Invalid sig length")
                 revert(0x00, 0x64)
             }
-
-            // Reject non-canonical public keys (low 128 bits must be zero), mirroring
-            // the C13 verifier and the SHA-2 / BLAKE2b twins. Without this a
-            // non-top-aligned pkRoot can never equal the always-N_MASK'd `currentNode`,
-            // silently bricking the account, and pkSeed would diverge from the signer,
-            // which always masks. Fail loudly instead.
             if or(iszero(eq(pkSeed, and(pkSeed, N_MASK))), iszero(eq(pkRoot, and(pkRoot, N_MASK)))) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)
@@ -54,55 +44,51 @@ contract SphincsC11Asm {
             let root := pkRoot
             mstore(0x00, seed)
 
-            // H_msg (domain-separated, 160 bytes)
+            // H_msg (domain-separated, 160 bytes) — nn=32.
             let R := and(calldataload(sig.offset), N_MASK)
             mstore(0x20, root)
             mstore(0x40, R)
             mstore(0x60, message)
             mstore(0x80, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)
-            let digest := keccak256(0x00, 0xA0)
+            let digest := blake2b(0x00, 0xA0, 32)
 
-            // htIdx = (digest >> 143) & (2^16-1) — digest parsing is independent of ADRS layout.
+            // htIdx = (digest >> 143) & (2^16-1).  143 = K*A = 13*11.
             let htIdx := and(shr(143, digest), 0xFFFF)
 
-            // FORS+C (K=13, A=11) — FIPS 205 FORS field split (per-message leaf keying):
-            //   tree=idxTree0 (htIdx>>SUBTREE_H), kp=idxLeaf0 (htIdx&(2^SUBTREE_H-1)),
-            //   tree_index=(forsTree<<(A-height))|node, tree_height=height.
             let dVal := digest
-            // Forced-zero: last index (i=12) at bits 132..142
-            if and(shr(132, dVal), 0x7FF) { revert(0, 0) }
+            // Forced-zero: last FORS index (i=K-1=12) at bits [132,143). 132=(K-1)*A.
+            if and(shr(132, dVal), 0x7FF) { mstore(0x00, 0) return(0x00, 0x20) }
 
             let sigBase := sig.offset
-            // SUBTREE_H = 8 (h/d = 16/2): split htIdx into bottom subtree + leaf.
+
+            // SUBTREE_H = 8 (h/d = 16/2).
             let idxLeaf0 := and(htIdx, 0xFF)
             let idxTree0 := shr(8, htIdx)
             // forsBase: tree=idxTree0 (shl 128), type=3 (shl 96), kp=idxLeaf0 (shl 64).
             let forsBase := or(shl(128, idxTree0), or(shl(96, 3), shl(64, idxLeaf0)))
             // K-1=12 normal trees
             for { let i := 0 } lt(i, 12) { i := add(i, 1) } {
-                let treeIdx := and(shr(mul(i, 11), dVal), 0x7FF) // 11-bit indices
+                let treeIdx := and(shr(mul(i, 11), dVal), 0x7FF) // 11=A-bit indices
                 let secretVal := and(calldataload(add(sigBase, add(16, shl(4, i)))), N_MASK)
                 // Leaf hash (height 0): word3 = (i << A) | treeIdx, A=11
                 let leafAdrs := or(forsBase, or(shl(11, i), treeIdx))
                 mstore(0x20, leafAdrs)
                 mstore(0x40, secretVal)
-                let node := and(keccak256(0x00, 0x60), N_MASK)
+                let node := blake2b(0x00, 0x60, 16)
 
                 let pathIdx := treeIdx
-                // AUTH_START=224, auth per tree = 11*16 = 176
+                // AUTH_START = 16 + K*N = 224, auth per tree = A*N = 11*16 = 176
                 let authPtr := add(sigBase, add(224, mul(i, 176)))
 
-                // Walk A=11 auth path levels
                 for { let h := 0 } lt(h, 11) { h := add(h, 1) } {
                     let sibling := and(calldataload(add(authPtr, shl(4, h))), N_MASK)
                     let parentIdx := shr(1, pathIdx)
                     // word2=height=h+1; word3 = (i << (A-1-h)) | parentIdx, A-1=10
                     mstore(0x20, or(forsBase, or(shl(32, add(h, 1)), or(shl(sub(10, h), i), parentIdx))))
-                    // Branchless Merkle swap
                     let s := shl(5, and(pathIdx, 1))
                     mstore(xor(0x40, s), node)
                     mstore(xor(0x60, s), sibling)
-                    node := and(keccak256(0x00, 0x80), N_MASK)
+                    node := blake2b(0x00, 0x80, 16)
                     pathIdx := parentIdx
                 }
                 mstore(add(0x80, shl(5, i)), node)
@@ -111,49 +97,46 @@ contract SphincsC11Asm {
             // Last tree (forced-zero)
             {
                 let lastSecret := and(calldataload(add(sigBase, add(16, shl(4, 12)))), N_MASK) // 16+12*16=208
-                // Forced-zero tree (forsTree=12) as leaf node 0: word3 = (12 << A)
-                mstore(0x20, or(forsBase, shl(11, 12)))
+                mstore(0x20, or(forsBase, shl(11, 12))) // word3 = 12 << A
                 mstore(0x40, lastSecret)
-                // 0x80 + 12*0x20 = 0x80 + 0x180 = 0x200
-                mstore(0x200, and(keccak256(0x00, 0x60), N_MASK))
+                mstore(0x200, blake2b(0x00, 0x60, 16)) // 0x80 + 12*0x20
             }
 
-            // Compress 13 roots: keccak256(seed || rootsAdrs || 13 roots)
-            // FORS_ROOTS: tree=idxTree0 (shl 128), type=4 (shl 96), kp=idxLeaf0 (shl 64).
-            // = 32 + 32 + 13*32 = 480 = 0x1E0
+            // Compress 13 roots: = 32 + 32 + 13*32 = 480 = 0x1E0
+            // FORS_ROOTS: tree=idxTree0, type=4 (shl 96), kp=idxLeaf0 (shl 64).
             mstore(0x20, or(shl(128, idxTree0), or(shl(96, 4), shl(64, idxLeaf0))))
             for { let i := 0 } lt(i, 13) { i := add(i, 1) } {
                 mstore(add(0x40, shl(5, i)), mload(add(0x80, shl(5, i))))
             }
-            let forsPk := and(keccak256(0x00, 0x1E0), N_MASK)
+            let forsPk := blake2b(0x00, 0x1E0, 16)
 
             // ============================================================
             // Hypertree (D=2, subtree_h=8, w=8, l=43, target_sum=203)
             // ============================================================
             let currentNode := forsPk
             let idxTree := htIdx
-            let sigOff := 2336 // HT_START
+            let sigOff := 2336 // HT_START = AUTH_START + (K-1)*A*N = 224 + 12*176
 
             for { let layer := 0 } lt(layer, 2) { layer := add(layer, 1) } {
                 let idxLeaf := and(idxTree, 0xFF) // 2^8 - 1
                 idxTree := shr(8, idxTree)
 
                 let wotsAdrs := or(shl(224, layer), or(shl(128, idxTree), shl(64, idxLeaf)))
-                // countOff = sigOff + l*N = sigOff + 688
-                let countOff := add(sigOff, 688)
+                let countOff := add(sigOff, 688) // l*N = 43*16
                 let count := shr(224, calldataload(add(sigBase, countOff)))
 
+                // WOTS-message digest — nn=32.
                 mstore(0x20, wotsAdrs)
                 mstore(0x40, currentNode)
                 mstore(0x60, count)
-                let d := keccak256(0x00, 0x80)
+                let d := blake2b(0x00, 0x80, 32)
 
-                // Validate digit sum = 203 (43 base-8 digits, 3 bits each)
+                // Validate WOTS+C digit sum == 203 (43 base-8 digits).
                 let digitSum := 0
                 for { let ii := 0 } lt(ii, 43) { ii := add(ii, 1) } {
                     digitSum := add(digitSum, and(shr(mul(ii, 3), d), 0x7))
                 }
-                if iszero(eq(digitSum, 203)) { revert(0, 0) }
+                if iszero(eq(digitSum, 203)) { mstore(0x00, 0) return(0x00, 0x20) }
 
                 // 43 WOTS chains (w=8: max 7 steps per chain)
                 let wotsPtr := add(sigBase, sigOff)
@@ -161,26 +144,24 @@ contract SphincsC11Asm {
                     let digit := and(shr(mul(i, 3), d), 0x7)
                     let steps := sub(7, digit)
                     let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
-                    // FIPS WOTS_HASH: chain_address=word2 (shl 32), hash_address=word3 (shl 0)
                     let chainBase := or(wotsAdrs, shl(32, i))
-
                     for { let step := 0 } lt(step, steps) { step := add(step, 1) } {
                         mstore(0x20, or(chainBase, add(digit, step)))
                         mstore(0x40, val)
-                        val := and(keccak256(0x00, 0x60), N_MASK)
+                        val := blake2b(0x00, 0x60, 16)
                     }
                     mstore(add(0x80, shl(5, i)), val)
                 }
 
-                // PK compression: 32+32+43*32 = 1440 = 0x5A0
+                // WOTS_PK compression: type=1, word1=idxLeaf. = 32+32+43*32 = 1440 = 0x5A0
                 let pkAdrs := or(shl(224, layer), or(shl(128, idxTree), or(shl(96, 1), shl(64, idxLeaf))))
                 mstore(0x20, pkAdrs)
                 for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
                     mstore(add(0x40, shl(5, i)), mload(add(0x80, shl(5, i))))
                 }
-                let wotsPk := and(keccak256(0x00, 0x5A0), N_MASK)
+                let wotsPk := blake2b(0x00, 0x5A0, 16)
 
-                // Merkle auth path (8 levels)
+                // TREE Merkle auth path (8 levels): type=2, word2=height, word3=tree_index
                 let authOff := add(countOff, 4)
                 let treeAdrs := or(shl(224, layer), or(shl(128, idxTree), shl(96, 2)))
                 let merkleNode := wotsPk
@@ -190,12 +171,11 @@ contract SphincsC11Asm {
                 for { let h := 0 } lt(h, 8) { h := add(h, 1) } {
                     let sibling := and(calldataload(add(merklePtr, shl(4, h))), N_MASK)
                     let parentIdx := shr(1, mIdx)
-                    // type=2, word2=height=h+1, word3=tree_index=parentIdx
                     mstore(0x20, or(treeAdrs, or(shl(32, add(h, 1)), parentIdx)))
                     let s := shl(5, and(mIdx, 1))
                     mstore(xor(0x40, s), merkleNode)
                     mstore(xor(0x60, s), sibling)
-                    merkleNode := and(keccak256(0x00, 0x80), N_MASK)
+                    merkleNode := blake2b(0x00, 0x80, 16)
                     mIdx := parentIdx
                 }
 
@@ -206,6 +186,55 @@ contract SphincsC11Asm {
             valid := eq(currentNode, root)
             mstore(0x00, valid)
             return(0x00, 0x20)
+
+            // ── BLAKE2b kernel (validated in test/Blake2bKernelTest.t.sol) ──
+            function blake2b(inPtr, inLen, nnLocal) -> result {
+                let S := 0x800
+                mstore(S, shl(224, 12)) // rounds = 12 (big-endian)
+                let h0 := bswap64(xor(xor(0x6a09e667f3bcc908, 0x01010000), nnLocal))
+                mstore(add(S, 4), or(or(shl(192, h0), shl(128, bswap64(0xbb67ae8584caa73b))),
+                                     or(shl(64, bswap64(0x3c6ef372fe94f82b)), bswap64(0xa54ff53a5f1d36f1))))
+                mstore(add(S, 36), or(or(shl(192, bswap64(0x510e527fade682d1)), shl(128, bswap64(0x9b05688c2b3e6c1f))),
+                                      or(shl(64, bswap64(0x1f83d9abfb41bd6b)), bswap64(0x5be0cd19137e2179))))
+                let remaining := inLen
+                let blockOff := 0
+                let processed := 0
+                for {} 1 {} {
+                    let thisLen := 128
+                    let isLast := 0
+                    if lt(remaining, 128) { thisLen := remaining isLast := 1 }
+                    if eq(remaining, 128) { isLast := 1 }
+                    processed := add(processed, thisLen)
+                    mstore(add(S, 68), 0) mstore(add(S, 100), 0)
+                    mstore(add(S, 132), 0) mstore(add(S, 164), 0)
+                    let src := add(inPtr, blockOff)
+                    let dst := add(S, 68)
+                    let full := and(thisLen, not(31))
+                    let o := 0
+                    for {} lt(o, full) { o := add(o, 32) } { mstore(add(dst, o), mload(add(src, o))) }
+                    let rest := and(thisLen, 31)
+                    if rest {
+                        let mask := not(shr(mul(rest, 8), not(0)))
+                        mstore(add(dst, o), and(mload(add(src, o)), mask))
+                    }
+                    mstore(add(S, 196), shl(192, bswap64(processed))) // t_0 (LE), t_1=0
+                    mstore8(add(S, 212), isLast)
+                    if iszero(staticcall(gas(), 0x09, S, 213, add(S, 4), 64)) { revert(0, 0) }
+                    remaining := sub(remaining, thisLen)
+                    blockOff := add(blockOff, 128)
+                    if iszero(remaining) { break }
+                }
+                switch nnLocal
+                case 16 { result := and(mload(add(S, 4)), 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000) }
+                default { result := mload(add(S, 4)) }
+            }
+
+            function bswap64(x) -> y {
+                for { let i := 0 } lt(i, 8) { i := add(i, 1) } {
+                    y := or(shl(8, y), and(x, 0xff))
+                    x := shr(8, x)
+                }
+            }
         }
     }
 }

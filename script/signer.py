@@ -45,7 +45,10 @@ VARIANTS = {
     "c2": {"h": 18, "d": 2, "k": 13, "a": 13, "m_max": 0,   "scheme": "fors",
             "subtree_h": 9, "sig_size": 4040},
     "c6": {"h": 24, "d": 2, "k": 8, "a": 16, "m_max": 0, "scheme": "fors",
-            "subtree_h": 12, "sig_size": 3352},
+            "subtree_h": 12, "sig_size": 3352,
+            # See the c10 note: FORS bound to the hypertree leaf via the JARDIN
+            # `tree` field, matching the fixed legacy/src/SPHINCs-C6Asm.sol.
+            "fors_bind_ht_tree": True},
     "c7": {"h": 24, "d": 2, "k": 8, "a": 16, "m_max": 0, "scheme": "fors",
             "subtree_h": 12, "sig_size": 3704,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 151, "w_mask": 0x7,
@@ -53,7 +56,10 @@ VARIANTS = {
             "fors_bind_leaf": True},  # key FORS instance by per-message hypertree leaf (FIPS field split)
     "c8": {"h": 20, "d": 2, "k": 12, "a": 13, "m_max": 0, "scheme": "fors",
             "subtree_h": 10, "sig_size": 3848,
-            "w": 16, "log_w": 4, "l": 32, "len1": 32, "target_sum": 162, "w_mask": 0xF},
+            "w": 16, "log_w": 4, "l": 32, "len1": 32, "target_sum": 162, "w_mask": 0xF,
+            # See the c10 note: FORS bound to the hypertree leaf via the JARDIN
+            # `tree` field, matching the fixed legacy/src/SPHINCs-C8Asm.sol.
+            "fors_bind_ht_tree": True},
     "c9": {"h": 20, "d": 2, "k": 11, "a": 12, "m_max": 0, "scheme": "fors",
             "subtree_h": 10, "sig_size": 3816,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 208, "w_mask": 0x7,
@@ -61,7 +67,12 @@ VARIANTS = {
             "fors_bind_leaf": True},  # key FORS instance by per-message hypertree leaf (FIPS field split)
     "c10": {"h": 18, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 9, "sig_size": 4008,
-            "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 205, "w_mask": 0x7},
+            "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 205, "w_mask": 0x7,
+            # Legacy JARDIN ADRS kept, but FORS is bound to the per-message
+            # hypertree leaf via the JARDIN `tree` field (kp stays the FORS tree
+            # number, ha stays the node index). Mirrors the fixed
+            # legacy/src/SPHINCs-C10Asm.sol and EthereumPhone/PQ1's SPHINCsC10Asm.
+            "fors_bind_ht_tree": True},
     "c11": {"h": 16, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 8, "sig_size": 3976,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 203, "w_mask": 0x7,
@@ -85,6 +96,20 @@ VARIANTS = {
             "subtree_h": 11, "sig_size": 3688,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 208, "w_mask": 0x7,
             "adrs_mode": "adrsc", "hash": "sha2", "parse": "msb",
+            "fors_bind_leaf": True},
+    # BLAKE2b "minimal twins" of the keccak C-series: identical construction and
+    # signature byte layout, FIPS uncompressed 32-byte ADRS, default (keccak) LSB
+    # digest parsing — only BLAKE2b (via the 0x09 precompile on-chain) instead of
+    # keccak256. NOT FIPS (BLAKE2b has no FIPS 205 instantiation). See src/blake/.
+    "c11-blake": {"h": 16, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
+            "subtree_h": 8, "sig_size": 3976,
+            "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 203, "w_mask": 0x7,
+            "adrs_mode": "fips", "hash": "blake2",
+            "fors_bind_leaf": True},
+    "c13-blake": {"h": 22, "d": 2, "k": 7, "a": 19, "m_max": 0, "scheme": "fors",
+            "subtree_h": 11, "sig_size": 3688,
+            "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 208, "w_mask": 0x7,
+            "adrs_mode": "fips", "hash": "blake2",
             "fors_bind_leaf": True},
 }
 
@@ -251,6 +276,38 @@ def h_msg_sha2(seed, root, R, message):
     return sha256_int(to_b32(seed) + to_b32(root) + to_b32(R) +
                       to_b32(message) + to_b32(HMSG_DOMAIN))
 
+# ── BLAKE2b "minimal twin" backend (matches src/blake/) ──
+# Same 32-byte-word framing as the keccak path (FIPS uncompressed ADRS), only
+# BLAKE2b instead of keccak256. F/H/T -> 16-byte digest (top-aligned, like
+# keccak & N_MASK); H_msg and the WOTS+C message digest -> 32-byte digest (full).
+# On-chain these run on the BLAKE2F compression precompile (0x09); off-chain
+# hashlib.blake2b is BLAKE2b directly. The differing digest_size (16 vs 32) lives
+# in the BLAKE2b parameter block, so it also domain-separates F/H/T from H_msg.
+def _blake16(data: bytes) -> int:
+    return int.from_bytes(hashlib.blake2b(data, digest_size=16).digest(), "big") << 128
+
+def _blake32(data: bytes) -> int:
+    return int.from_bytes(hashlib.blake2b(data, digest_size=32).digest(), "big")
+
+def th_blake2(seed, adrs, inp):
+    return _blake16(to_b32(seed) + to_b32(adrs) + to_b32(inp))
+
+def th_pair_blake2(seed, adrs, left, right):
+    return _blake16(to_b32(seed) + to_b32(adrs) + to_b32(left) + to_b32(right))
+
+def th_multi_blake2(seed, adrs, vals):
+    data = to_b32(seed) + to_b32(adrs)
+    for v in vals:
+        data += to_b32(v)
+    return _blake16(data)
+
+def wots_digest_blake2(seed, adrs, msg_hash, count):
+    return _blake32(to_b32(seed) + to_b32(adrs) + to_b32(msg_hash) + to_b32(count))
+
+def h_msg_blake2(seed, root, R, message):
+    return _blake32(to_b32(seed) + to_b32(root) + to_b32(R) +
+                    to_b32(message) + to_b32(HMSG_DOMAIN))
+
 def set_chain_index_adrsc(adrs, idx):
     """ADRSc WOTS_HASH: chain_address is word2 (shl 112)."""
     mask = FULL ^ (0xFFFFFFFF << 112)
@@ -268,16 +325,22 @@ def chain_hash_adrsc(seed, adrs, val, start_pos, steps):
 def th(seed, adrs, inp):
     if HASH_BACKEND == "sha2":
         return th_sha2(seed, adrs, inp)
+    if HASH_BACKEND == "blake2":
+        return th_blake2(seed, adrs, inp)
     return _keccak_3x32(seed, adrs, inp) & N_MASK
 
 def th_pair(seed, adrs, left, right):
     if HASH_BACKEND == "sha2":
         return th_pair_sha2(seed, adrs, left, right)
+    if HASH_BACKEND == "blake2":
+        return th_pair_blake2(seed, adrs, left, right)
     return _keccak_4x32(seed, adrs, left, right) & N_MASK
 
 def th_multi(seed, adrs, vals):
     if HASH_BACKEND == "sha2":
         return th_multi_sha2(seed, adrs, vals)
+    if HASH_BACKEND == "blake2":
+        return th_multi_blake2(seed, adrs, vals)
     data = to_b32(seed) + to_b32(adrs)
     for v in vals:
         data += to_b32(v)
@@ -292,6 +355,8 @@ def h_msg(seed, root, R, message):
     SHA-2 compact twins use a one-shot SHA-256 over the same 160-byte preimage."""
     if HASH_BACKEND == "sha2":
         return h_msg_sha2(seed, root, R, message)
+    if HASH_BACKEND == "blake2":
+        return h_msg_blake2(seed, root, R, message)
     data = to_b32(seed) + to_b32(root) + to_b32(R) + to_b32(message) + to_b32(HMSG_DOMAIN)
     return keccak256(data)
 
@@ -314,12 +379,16 @@ def chain_hash(seed, adrs, val, start_pos, steps):
     return val
 
 def chain_hash_fips(seed, adrs, val, start_pos, steps):
-    """FIPS chain hash: hash_address is word3 (bytes 28..32, shl 0)."""
+    """FIPS chain hash: hash_address is word3 (bytes 28..32, shl 0).
+    Routes through the th() dispatcher so the WOTS chain uses the configured
+    backend (keccak/sha2/blake2). For keccak, th() == _keccak_3x32 & N_MASK
+    (unchanged); previously this hardcoded keccak, which silently diverged from
+    the BLAKE2b verifier while the Python self-check still passed."""
     pos_clear = FULL ^ 0xFFFFFFFF
     for step in range(steps):
         pos = start_pos + step
         a = (adrs & pos_clear) | (pos & 0xFFFFFFFF)
-        val = _keccak_3x32(seed, a, val) & N_MASK
+        val = th(seed, a, val)
     return val
 
 def set_chain_index(adrs, idx):
@@ -421,6 +490,8 @@ def wots_digest(seed, layer, tree, kp, msg_hash, count, cfg=None):
     hash_adrs = mk_adrs(layer, tree, ADRS_WOTS, kp, 0, 0, 0)
     if HASH_BACKEND == "sha2":
         return wots_digest_sha2(seed, hash_adrs, msg_hash, count)
+    if HASH_BACKEND == "blake2":
+        return wots_digest_blake2(seed, hash_adrs, msg_hash, count)
     return _keccak_4x32(seed, hash_adrs, msg_hash, count)
 
 def extract_digits(d, cfg=None):
@@ -504,25 +575,51 @@ def build_subtree_full(seed, sk_seed, layer, tree, subtree_h, cfg=None):
 #  FORS+C
 # ============================================================
 
-def build_fors_tree(seed, sk_seed, tree_idx, a, cfg=None, ht_idx=None, idx_leaf0=None, idx_tree0=None):
+def _fors_bind_mode(cfg):
+    """Which FORS position-binding scheme a variant uses.
+
+    "fips"    — exact FIPS 205 FORS field split: tree=idx_tree0, kp=idx_leaf0,
+                tree_index=(fors_tree << (a-height)) | node. Live src/ verifiers.
+    "ht_tree" — legacy JARDIN layout with the hypertree leaf in the `tree` field:
+                tree=ht_idx, kp=fors_tree, cp=height, ha=node. Legacy C6/C8/C10.
+    None      — unbound (one FORS forest shared by all 2^h positions). No live or
+                legacy C-series variant uses this any more; kept because the
+                un-migrated c2 entry and any future JARDIN-layout replay depend
+                on it. See the security note in legacy/src/SPHINCs-C10Asm.sol.
+    """
+    if cfg and cfg.get("fors_bind_leaf"):
+        return "fips"
+    if cfg and cfg.get("fors_bind_ht_tree"):
+        return "ht_tree"
+    return None
+
+def _fors_tree_adrs(mk_adrs, mode, ht_idx, idx_tree0, idx_leaf0, tree_idx, a, height, node):
+    """FORS_TREE ADRS for one node, per binding mode (see _fors_bind_mode)."""
+    if mode == "fips":
+        return mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, height,
+                       (tree_idx << (a - height)) | node)
+    if mode == "ht_tree":
+        return mk_adrs(0, ht_idx, ADRS_FORS_TREE, tree_idx, 0, height, node)
+    return mk_adrs(0, 0, ADRS_FORS_TREE, tree_idx, 0, height, node)
+
+def build_fors_tree(seed, sk_seed, tree_idx, a, cfg=None, ht_idx=None, idx_leaf0=None,
+                    idx_tree0=None, mode=None):
     """Build one FORS Merkle tree.
 
-    When bound (ht_idx is not None — exact FIPS 205 FORS field split): tree
-    address = idx_tree0, kp = idx_leaf0, tree_index = (tree_idx << (a-height))
-    | node, tree_height = height, and the leaf secret PRF folds in ht_idx. This
-    keys the FORS instance by the per-message hypertree leaf (matches C12 /
-    SLH-DSA field semantics, FIPS 205 Alg. 17). Variants without the binding
-    pass ht_idx=None: original layout (tree=0, kp=tree_idx, tree_index=node),
-    secret PRF unchanged — byte-for-byte preserved."""
+    `mode` selects the position binding (see _fors_bind_mode). Whenever it is
+    not None the leaf secret PRF also folds in ht_idx, so each hypertree
+    position gets an independent FORS instance (standard SLH-DSA few-time
+    behaviour) — the ADRS binding alone stops cross-position replay, but only
+    the PRF binding stops secrets harvested at one position from reconstructing
+    another position's forest. Unbound variants keep their original preimages
+    byte-for-byte."""
     mk_adrs, _, _ = _adrs_helpers(cfg)
     n_leaves = 1 << a
     leaves = []
     for j in range(n_leaves):
         secret = fors_secret(sk_seed, tree_idx, j, ht_idx)
-        if ht_idx is not None:
-            leaf_adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, 0, (tree_idx << a) | j)
-        else:
-            leaf_adrs = mk_adrs(0, 0, ADRS_FORS_TREE, tree_idx, 0, 0, j)
+        leaf_adrs = _fors_tree_adrs(mk_adrs, mode, ht_idx, idx_tree0, idx_leaf0,
+                                    tree_idx, a, 0, j)
         leaves.append(th(seed, leaf_adrs, secret))
     nodes = [leaves]
     for h in range(a):
@@ -530,11 +627,8 @@ def build_fors_tree(seed, sk_seed, tree_idx, a, cfg=None, ht_idx=None, idx_leaf0
         level = []
         for idx in range(0, len(prev), 2):
             parent_idx = idx // 2
-            if ht_idx is not None:
-                ti = (tree_idx << (a - (h + 1))) | parent_idx
-                adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, h + 1, ti)
-            else:
-                adrs = mk_adrs(0, 0, ADRS_FORS_TREE, tree_idx, 0, h + 1, parent_idx)
+            adrs = _fors_tree_adrs(mk_adrs, mode, ht_idx, idx_tree0, idx_leaf0,
+                                   tree_idx, a, h + 1, parent_idx)
             level.append(th_pair(seed, adrs, prev[idx], prev[idx + 1]))
         nodes.append(level)
     return nodes, nodes[a][0]
@@ -550,8 +644,9 @@ def fors_sign_full(seed, sk_seed, digest, k, a, cfg=None):
     # verifier parses and the hypertree consumes — split into the bottom subtree
     # (idx_tree0 → tree address) and leaf (idx_leaf0 → kp). Gated by cfg so
     # variants without the binding are byte-for-byte unchanged.
+    mode = _fors_bind_mode(cfg)
     ht_idx = idx_leaf0 = idx_tree0 = None
-    if cfg and cfg.get("fors_bind_leaf"):
+    if mode is not None:
         ht_idx = _field(digest, k * a, cfg["h"], cfg)
         sh = cfg["subtree_h"]
         idx_leaf0 = ht_idx & ((1 << sh) - 1)
@@ -563,18 +658,24 @@ def fors_sign_full(seed, sk_seed, digest, k, a, cfg=None):
 
     for t in range(k - 1):
         eprint(f"  FORS tree {t}/{k-1}...")
-        tree_nodes, root = build_fors_tree(seed, sk_seed, t, a, cfg, ht_idx, idx_leaf0, idx_tree0)
+        tree_nodes, root = build_fors_tree(seed, sk_seed, t, a, cfg, ht_idx, idx_leaf0,
+                                           idx_tree0, mode)
         secrets.append(fors_secret(sk_seed, t, indices[t], ht_idx))
         auth_paths.append(get_auth_path(tree_nodes, indices[t], a))
         roots.append(root)
 
     eprint(f"  FORS tree {k-1}/{k-1} (forced-zero)...")
-    _, root_last = build_fors_tree(seed, sk_seed, k - 1, a, cfg, ht_idx, idx_leaf0, idx_tree0)
+    _, root_last = build_fors_tree(seed, sk_seed, k - 1, a, cfg, ht_idx, idx_leaf0,
+                                    idx_tree0, mode)
     secrets.append(root_last)
-    if ht_idx is not None:
+    if mode == "fips":
         # Forced-zero tree (forsTree=k-1) as leaf node 0: tree_index = (k-1) << a
         fz_adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, 0, (k - 1) << a)
         roots_adrs = mk_adrs(0, idx_tree0, ADRS_FORS_ROOTS, idx_leaf0, 0, 0, 0)
+    elif mode == "ht_tree":
+        # JARDIN layout: forced-zero tree as kp=k-1, node 0; roots kp=0.
+        fz_adrs = mk_adrs(0, ht_idx, ADRS_FORS_TREE, k - 1, 0, 0, 0)
+        roots_adrs = mk_adrs(0, ht_idx, ADRS_FORS_ROOTS, 0, 0, 0, 0)
     else:
         fz_adrs = mk_adrs(0, 0, ADRS_FORS_TREE, k - 1, 0, 0, 0)
         roots_adrs = mk_adrs(0, 0, ADRS_FORS_ROOTS, 0, 0, 0, 0)
@@ -736,24 +837,34 @@ def verify_c_series(seed, root, message, sig, cfg):
     idx_tree0 = htIdx >> subtree_h
 
     # ---- FORS+C ----
+    # FORS position binding follows the variant's mode (see _fors_bind_mode);
+    # `mode is None` reproduces the unbound legacy C6/C8 addressing.
+    mode = _fors_bind_mode(cfg)
     auth_start = n + k * n
     per_auth = a * n
     roots = []
     for t in range(k - 1):
         mdT = _field(digest, t * a, a, cfg)
-        node = th(seed, mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, 0, (t << a) | mdT), rd(n + t * n))
+        node = th(seed, _fors_tree_adrs(mk_adrs, mode, htIdx, idx_tree0, idx_leaf0, t, a, 0, mdT),
+                  rd(n + t * n))
         path_idx = mdT
         ap = auth_start + t * per_auth
         for hh in range(a):
             sib = rd(ap + hh * n)
             parent = path_idx >> 1
-            adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, hh + 1, (t << (a - 1 - hh)) | parent)
+            adrs = _fors_tree_adrs(mk_adrs, mode, htIdx, idx_tree0, idx_leaf0, t, a, hh + 1, parent)
             node = th_pair(seed, adrs, node, sib) if (path_idx & 1) == 0 else th_pair(seed, adrs, sib, node)
             path_idx = parent
         roots.append(node)
-    fz_adrs = mk_adrs(0, idx_tree0, ADRS_FORS_TREE, idx_leaf0, 0, 0, (k - 1) << a)
+    fz_adrs = _fors_tree_adrs(mk_adrs, mode, htIdx, idx_tree0, idx_leaf0, k - 1, a, 0, 0)
     roots.append(th(seed, fz_adrs, rd(n + (k - 1) * n)))
-    current = th_multi(seed, mk_adrs(0, idx_tree0, ADRS_FORS_ROOTS, idx_leaf0, 0, 0, 0), roots)
+    if mode == "fips":
+        roots_adrs = mk_adrs(0, idx_tree0, ADRS_FORS_ROOTS, idx_leaf0, 0, 0, 0)
+    elif mode == "ht_tree":
+        roots_adrs = mk_adrs(0, htIdx, ADRS_FORS_ROOTS, 0, 0, 0, 0)
+    else:
+        roots_adrs = mk_adrs(0, 0, ADRS_FORS_ROOTS, 0, 0, 0, 0)
+    current = th_multi(seed, roots_adrs, roots)
 
     # ---- Hypertree (WOTS+C + Merkle) ----
     idx_tree = htIdx

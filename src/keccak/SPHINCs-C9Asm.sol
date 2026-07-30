@@ -13,7 +13,14 @@ contract SphincsC9Asm {
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external pure returns (bool valid)
     {
-        assembly ("memory-safe") {
+        // NOTE: this block intentionally uses Solidity's free-memory-pointer slot
+        // (0x40) and the zero slot (0x60) as scratch and writes high memory without
+        // updating the FMP. That is only sound because every exit below is an
+        // unconditional in-assembly `return`/`revert`, so Solidity never regains
+        // control with a clobbered FMP. It is therefore NOT `memory-safe` in the
+        // Yul sense — do not add the ("memory-safe") annotation and do not introduce
+        // a normal (fall-through) exit from this block. (matches C13, review C13-evm-f1)
+        assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
             if iszero(eq(sig.length, 3816)) {
@@ -21,6 +28,19 @@ contract SphincsC9Asm {
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
                 mstore(0x44, "Invalid sig length")
+                revert(0x00, 0x64)
+            }
+
+            // Reject non-canonical public keys (low 128 bits must be zero), mirroring
+            // the C13 verifier and the SHA-2 / BLAKE2b twins. Without this a
+            // non-top-aligned pkRoot can never equal the always-N_MASK'd `currentNode`,
+            // silently bricking the account, and pkSeed would diverge from the signer,
+            // which always masks. Fail loudly instead.
+            if or(iszero(eq(pkSeed, and(pkSeed, N_MASK))), iszero(eq(pkRoot, and(pkRoot, N_MASK)))) {
+                mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
+                mstore(0x04, 0x20)
+                mstore(0x24, 18)
+                mstore(0x44, "Invalid public key")
                 revert(0x00, 0x64)
             }
 

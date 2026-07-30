@@ -26,8 +26,12 @@ contract SphincsAccountAccessControlTest is Test {
     address attacker = makeAddr("attacker");
     address verifier = makeAddr("verifier"); // never invoked in these tests
 
-    bytes32 constant PK_SEED = bytes32(uint256(0xA1));
-    bytes32 constant PK_ROOT = bytes32(uint256(0xA2));
+    // Arbitrary sentinels — the verifier is never invoked here. They must still be
+    // TOP-aligned (low 128 bits zero): `SphincsAccount` now rejects non-canonical
+    // keys wherever they would be committed, so a low-aligned sentinel would trip
+    // NonCanonicalKey in the constructor instead of exercising access control.
+    bytes32 constant PK_SEED = bytes32(uint256(0xA1) << 128);
+    bytes32 constant PK_ROOT = bytes32(uint256(0xA2) << 128);
 
     function setUp() public {
         account = new SphincsAccount(
@@ -78,20 +82,37 @@ contract SphincsAccountAccessControlTest is Test {
     function test_OwnerEoa_CannotCallRotateKeys_Directly() public {
         vm.prank(owner);
         vm.expectRevert(SphincsAccount.NotSelfOrEntryPoint.selector);
-        account.rotateKeys(bytes32(uint256(1)), bytes32(uint256(2)));
+        account.rotateKeys(bytes32(uint256(1) << 128), bytes32(uint256(2) << 128));
     }
 
     function test_RandomEoa_CannotCallRotateKeys_Directly() public {
         vm.prank(attacker);
         vm.expectRevert(SphincsAccount.NotSelfOrEntryPoint.selector);
-        account.rotateKeys(bytes32(uint256(1)), bytes32(uint256(2)));
+        account.rotateKeys(bytes32(uint256(1) << 128), bytes32(uint256(2) << 128));
     }
 
     function test_EntryPoint_CanCallRotateKeys() public {
         vm.prank(ep);
-        account.rotateKeys(bytes32(uint256(0xB1)), bytes32(uint256(0xB2)));
-        assertEq(account.pkSeed(), bytes32(uint256(0xB1)));
-        assertEq(account.pkRoot(), bytes32(uint256(0xB2)));
+        account.rotateKeys(bytes32(uint256(0xB1) << 128), bytes32(uint256(0xB2) << 128));
+        assertEq(account.pkSeed(), bytes32(uint256(0xB1) << 128));
+        assertEq(account.pkRoot(), bytes32(uint256(0xB2) << 128));
+    }
+
+    // ── key-shape validation ───────────────────────────────────────────────
+    //
+    // A non-canonical key is unusable by every verifier, so committing one would
+    // brick the account: `rotateKeys` is only reachable through a fully validated
+    // UserOp, which can no longer be produced once the stored key is unusable.
+
+    function test_EntryPoint_CannotRotateToNonCanonicalKey() public {
+        vm.prank(ep);
+        vm.expectRevert(SphincsAccount.NonCanonicalKey.selector);
+        account.rotateKeys(bytes32(uint256(0xB1)), bytes32(uint256(0xB2) << 128));
+    }
+
+    function test_Constructor_RejectsNonCanonicalKey() public {
+        vm.expectRevert(SphincsAccount.NonCanonicalKey.selector);
+        new SphincsAccount(IEntryPoint(ep), owner, verifier, PK_SEED, bytes32(uint256(0xA2)));
     }
 
     // ── rotateOwner ────────────────────────────────────────────────────────
