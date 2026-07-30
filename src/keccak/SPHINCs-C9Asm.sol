@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 pragma solidity ^0.8.28;
 
 /// @title SphincsC9Asm — Stateless SPHINCS+ C9 verifier (shared, Yul-optimized)

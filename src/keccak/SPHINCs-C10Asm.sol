@@ -3,20 +3,31 @@
 
 pragma solidity ^0.8.28;
 
-/// @title SphincsC11Asm — Stateless SPHINCS+ C11 verifier (shared, Yul-optimized)
-/// @notice C11: W+C_F+C h=16 d=2 a=11 k=13 w=8 l=43 target_sum=203 sig=3976.
-///         Lightest C-series signer (~292 K hashes); security degrades to ~86 bit
-///         at a 2²⁰ signature cap, so prefer C13 when verify-time security matters.
-/// @dev    Migrated from the JARDIN 32-byte ADRS to the FIPS 205 §4.2 uncompressed
-///         32-byte ADRS + keccak256 (same layout as C7/C9/C13). The signature byte
-///         layout and hash structure are unchanged from the legacy verifier; only the
-///         ADRS word positions move (JARDIN's 8-byte tree → FIPS's 12-byte tree, and
-///         WOTS chain/hash from JARDIN ci(shl64)+cp(shl32) to FIPS word2(shl32)+word3(shl0)).
+/// @title SphincsC10Asm — Stateless SPHINCS+ C10 verifier (shared, Yul-optimized)
+/// @notice C10: W+C_F+C h=18 d=2 a=11 k=13 w=8 l=43 target_sum=205 sig=4008.
+///         Sits between C11 (h=16, ~86 bit at a 2²⁰ cap) and C9 (h=20, ~112.6 bit):
+///         ~104.5 bit at 2²⁰, ~609 K hashes to sign.
+/// @dev    Promoted out of `legacy/src/` and migrated from the JARDIN 32-byte ADRS to
+///         the FIPS 205 §4.2 uncompressed 32-byte ADRS + keccak256 (same layout as
+///         C7/C9/C11/C13). The signature byte layout and hash structure are unchanged
+///         from the legacy verifier; only the ADRS word positions move (JARDIN's
+///         8-byte tree → FIPS's 12-byte tree, and WOTS chain/hash from JARDIN
+///         ci(shl64)+cp(shl32) to FIPS word2(shl32)+word3(shl0)).
 ///         FORS is keyed by the per-message hypertree leaf via the exact FIPS field
 ///         split — tree=idxTree0, kp=idxLeaf0, tree_index folds in the FORS tree number
 ///         ((forsTree<<(A-height))|node). Domain-separated H_msg (160 bytes).
 ///         ADRS: layer(4) ‖ tree(12) ‖ type(4) ‖ word1 ‖ word2 ‖ word3.
-contract SphincsC11Asm {
+///
+///         Differs from C11 only in h (18 vs 16): SUBTREE_H 9 vs 8, target_sum 205 vs
+///         203, and one extra auth-path node per hypertree layer (sig 4008 vs 3976).
+///         The FORS section is byte-identical in layout, so HT_START is 2336 for both.
+///
+///         The JARDIN-layout original stays at `legacy/src/SPHINCs-C10Asm.sol` for
+///         benchmark reproducibility and because EthereumPhone/PQ1 tracks it; that one
+///         is driven by `script/signer.py c10`, this one by `c10-fips`. NOTE: this is
+///         the FIPS ADRS *layout*, not FIPS SLH-DSA — WOTS+C/FORS+C counter-grinding
+///         has no FIPS analog, H_msg is one-shot, and digest parsing is LSB-first.
+contract SphincsC10Asm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external pure returns (bool valid)
@@ -31,7 +42,7 @@ contract SphincsC11Asm {
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
-            if iszero(eq(sig.length, 3976)) {
+            if iszero(eq(sig.length, 4008)) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
@@ -64,8 +75,8 @@ contract SphincsC11Asm {
             mstore(0x80, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)
             let digest := keccak256(0x00, 0xA0)
 
-            // htIdx = (digest >> 143) & (2^16-1) — digest parsing is independent of ADRS layout.
-            let htIdx := and(shr(143, digest), 0xFFFF)
+            // htIdx = (digest >> 143) & (2^18-1) — 143 = K*A; parsing is ADRS-independent.
+            let htIdx := and(shr(143, digest), 0x3FFFF)
 
             // FORS+C (K=13, A=11) — FIPS 205 FORS field split (per-message leaf keying):
             //   tree=idxTree0 (htIdx>>SUBTREE_H), kp=idxLeaf0 (htIdx&(2^SUBTREE_H-1)),
@@ -75,9 +86,9 @@ contract SphincsC11Asm {
             if and(shr(132, dVal), 0x7FF) { revert(0, 0) }
 
             let sigBase := sig.offset
-            // SUBTREE_H = 8 (h/d = 16/2): split htIdx into bottom subtree + leaf.
-            let idxLeaf0 := and(htIdx, 0xFF)
-            let idxTree0 := shr(8, htIdx)
+            // SUBTREE_H = 9 (h/d = 18/2): split htIdx into bottom subtree + leaf.
+            let idxLeaf0 := and(htIdx, 0x1FF)
+            let idxTree0 := shr(9, htIdx)
             // forsBase: tree=idxTree0 (shl 128), type=3 (shl 96), kp=idxLeaf0 (shl 64).
             let forsBase := or(shl(128, idxTree0), or(shl(96, 3), shl(64, idxLeaf0)))
             // K-1=12 normal trees
@@ -130,15 +141,15 @@ contract SphincsC11Asm {
             let forsPk := and(keccak256(0x00, 0x1E0), N_MASK)
 
             // ============================================================
-            // Hypertree (D=2, subtree_h=8, w=8, l=43, target_sum=203)
+            // Hypertree (D=2, subtree_h=9, w=8, l=43, target_sum=205)
             // ============================================================
             let currentNode := forsPk
             let idxTree := htIdx
-            let sigOff := 2336 // HT_START
+            let sigOff := 2336 // HT_START = 16 + K*16 + (K-1)*A*16 (same as C11)
 
             for { let layer := 0 } lt(layer, 2) { layer := add(layer, 1) } {
-                let idxLeaf := and(idxTree, 0xFF) // 2^8 - 1
-                idxTree := shr(8, idxTree)
+                let idxLeaf := and(idxTree, 0x1FF) // 2^9 - 1
+                idxTree := shr(9, idxTree)
 
                 let wotsAdrs := or(shl(224, layer), or(shl(128, idxTree), shl(64, idxLeaf)))
                 // countOff = sigOff + l*N = sigOff + 688
@@ -150,12 +161,12 @@ contract SphincsC11Asm {
                 mstore(0x60, count)
                 let d := keccak256(0x00, 0x80)
 
-                // Validate digit sum = 203 (43 base-8 digits, 3 bits each)
+                // Validate digit sum = 205 (43 base-8 digits, 3 bits each)
                 let digitSum := 0
                 for { let ii := 0 } lt(ii, 43) { ii := add(ii, 1) } {
                     digitSum := add(digitSum, and(shr(mul(ii, 3), d), 0x7))
                 }
-                if iszero(eq(digitSum, 203)) { revert(0, 0) }
+                if iszero(eq(digitSum, 205)) { revert(0, 0) }
 
                 // 43 WOTS chains (w=8: max 7 steps per chain)
                 let wotsPtr := add(sigBase, sigOff)
@@ -182,14 +193,14 @@ contract SphincsC11Asm {
                 }
                 let wotsPk := and(keccak256(0x00, 0x5A0), N_MASK)
 
-                // Merkle auth path (8 levels)
+                // Merkle auth path (9 levels)
                 let authOff := add(countOff, 4)
                 let treeAdrs := or(shl(224, layer), or(shl(128, idxTree), shl(96, 2)))
                 let merkleNode := wotsPk
                 let mIdx := idxLeaf
                 let merklePtr := add(sigBase, authOff)
 
-                for { let h := 0 } lt(h, 8) { h := add(h, 1) } {
+                for { let h := 0 } lt(h, 9) { h := add(h, 1) } {
                     let sibling := and(calldataload(add(merklePtr, shl(4, h))), N_MASK)
                     let parentIdx := shr(1, mIdx)
                     // type=2, word2=height=h+1, word3=tree_index=parentIdx
@@ -202,7 +213,7 @@ contract SphincsC11Asm {
                 }
 
                 currentNode := merkleNode
-                sigOff := add(authOff, 128) // 8*16
+                sigOff := add(authOff, 144) // 9*16
             }
 
             valid := eq(currentNode, root)

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 /// SphincsFrameVerify — EIP-8141 VERIFY-frame module for SphincsFrameAccount.
 ///
 /// Spec: EIP-8141 "Frame Transaction" (Draft, last updated 2026-07-28).

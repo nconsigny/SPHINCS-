@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 pragma solidity ^0.8.28;
 
 /// @title SPHINCs-C12Asm — plain SPHINCS+ (SPX) verifier, JARDIN 32-byte ADRS

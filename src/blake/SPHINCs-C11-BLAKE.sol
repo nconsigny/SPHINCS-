@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 pragma solidity ^0.8.28;
 
 /// @title SphincsC11BlakeAsm — BLAKE2b "minimal twin" of the C11 verifier

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 pragma solidity ^0.8.28;
 
 /// @title SPHINCs_C12ShaAsm — full FIPS 205 SLH-DSA-SHA2 at the C12 parameter set

@@ -3,10 +3,10 @@
 
 pragma solidity ^0.8.28;
 
-/// @title SphincsC11ShaAsm — SHA-256 "minimal twin" of the C11 verifier
-/// @notice C11: W+C_F+C h=16 d=2 a=11 k=13 w=8 l=43 target_sum=203 sig=3976.
-/// @dev    SHA-256 + 22-byte compressed ADRSc twin of src/SPHINCs-C11Asm.sol
-///         (the keccak FIPS-uncompressed C11). The construction is IDENTICAL —
+/// @title SphincsC10ShaAsm — SHA-256 "minimal twin" of the C10 verifier
+/// @notice C10: W+C_F+C h=18 d=2 a=11 k=13 w=8 l=43 target_sum=205 sig=4008.
+/// @dev    SHA-256 + 22-byte compressed ADRSc twin of src/keccak/SPHINCs-C10Asm.sol
+///         (the keccak FIPS-uncompressed C10). The construction is IDENTICAL —
 ///         same WOTS+C / FORS+C counter-grinding, same signature byte layout,
 ///         same one-shot H_msg, same forced-zero FORS tree — only two things
 ///         change, as a coupled unit:
@@ -16,10 +16,21 @@ pragma solidity ^0.8.28;
 ///              22-byte ADRSc; and digest/digit parsing is MSB-first (FIPS base_2b
 ///              order) instead of the keccak family's LSB-first.
 ///
-///         This is NOT FIPS SLH-DSA: WOTS+C/FORS+C counter-grinding has no FIPS
+///         Changing the hash WITHOUT changing the address is not a FIPS-shaped
+///         SHA-2 instantiation: §11.1 (SHAKE) uses the full 32-byte ADRS, §11.2
+///         (SHA-2) uses ADRSc plus the toByte(0,64-n) pad that makes PK.seed fill
+///         exactly one SHA-256 block. EthereumPhone/PQ1's SPHINCsC10Asm swaps only
+///         the hash and keeps the legacy JARDIN 32-byte ADRS with no pad, so it is
+///         a self-consistent scheme but not the FIPS SHA-2 layout; this file is.
+///
+///         Still NOT FIPS SLH-DSA: WOTS+C/FORS+C counter-grinding has no FIPS
 ///         analog, and H_msg is one-shot (no MGF1, no context envelope). It is a
-///         research "SHA flavour" of C11. Vectors come from
-///         script/signer.py c11-sha (cfg: hash=sha2, adrs_mode=adrsc, parse=msb).
+///         research "SHA flavour" of C10. Vectors come from
+///         script/signer.py c10-sha (cfg: hash=sha2, adrs_mode=adrsc, parse=msb).
+///
+///         Differs from C11-SHA only in h (18 vs 16): SUBTREE_H 9 vs 8, htIdx at
+///         bit 95 vs 97 (256 - K*A - H), target_sum 205 vs 203, and one extra
+///         auth-path node per hypertree layer (sig 4008 vs 3976).
 ///
 ///         ADRSc (22 B, top-aligned in the 0x40 word; FIPS 205 §11.2), bit offsets:
 ///           layer(1) bit248 ‖ tree(8) bit184 ‖ type(1) bit176 ‖
@@ -30,7 +41,7 @@ pragma solidity ^0.8.28;
 ///         Memory prefix for every F/H/T (mirrors SLH-DSA-SHA2 kernel):
 ///           0x00..0x10 PK.seed ‖ 0x10..0x40 zeros (48 B) ‖ 0x40..0x56 ADRSc ‖ 0x56.. payload
 ///         16-byte-aligned, so Merkle children use explicit L-first/R-second order.
-contract SphincsC11ShaAsm {
+contract SphincsC10ShaAsm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external view returns (bool valid)
@@ -38,7 +49,7 @@ contract SphincsC11ShaAsm {
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
-            if iszero(eq(sig.length, 3976)) {
+            if iszero(eq(sig.length, 4008)) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
@@ -69,12 +80,12 @@ contract SphincsC11ShaAsm {
 
             // MSB-first digest parsing (FIPS base_2b order). Fields, from the MSB:
             //   FORS idx i (11 bit): (dWord >> (245 - 11i)) & 0x7FF     [245 = 256 - A]
-            //   htIdx     (16 bit): (dWord >> 97) & 0xFFFF              [97 = 256 - K*A - H]
+            //   htIdx     (18 bit): (dWord >> 95) & 0x3FFFF             [95 = 256 - K*A - H]
             //   forced-zero is FORS idx K-1=12: (dWord >> 113) & 0x7FF  [113 = 256 - K*A]
             if and(shr(113, dWord), 0x7FF) { mstore(0x00, 0) return(0x00, 0x20) }
-            let htIdx := and(shr(97, dWord), 0xFFFF)
-            let idxLeaf0 := and(htIdx, 0xFF)   // SUBTREE_H = 8
-            let idxTree0 := shr(8, htIdx)
+            let htIdx := and(shr(95, dWord), 0x3FFFF)
+            let idxLeaf0 := and(htIdx, 0x1FF)   // SUBTREE_H = 9
+            let idxTree0 := shr(9, htIdx)
 
             // F/H/T prefix: seed at 0x00 (top 16 = value), 48 zero bytes 0x10..0x40.
             mstore(0x00, seed)
@@ -128,13 +139,13 @@ contract SphincsC11ShaAsm {
             if iszero(staticcall(gas(), 0x02, 0x00, 0x126, 0x80, 0x20)) { revert(0, 0) }
             let currentNode := and(mload(0x80), N_MASK)
 
-            // ──────────────────── Hypertree (D=2, subtree_h=8) ────────────────────
+            // ──────────────────── Hypertree (D=2, subtree_h=9) ────────────────────
             let idxTree := htIdx
             let sigOff := 2336   // HT_START = 224 + (K-1)*A*N = 224 + 12*176
 
             for { let layer := 0 } lt(layer, 2) { layer := add(layer, 1) } {
-                let idxLeaf := and(idxTree, 0xFF)
-                idxTree := shr(8, idxTree)
+                let idxLeaf := and(idxTree, 0x1FF)
+                idxTree := shr(9, idxTree)
                 // wotsBase: type=0, layer @248, tree=idxTree @184, kp=idxLeaf @144
                 let wotsBase := or(shl(248, layer), or(shl(184, idxTree), shl(144, idxLeaf)))
 
@@ -148,12 +159,12 @@ contract SphincsC11ShaAsm {
                 if iszero(staticcall(gas(), 0x02, 0x00, 0x6A, 0x80, 0x20)) { revert(0, 0) }
                 let d := mload(0x80)
 
-                // WOTS+C digit sum == 203 (43 base-8 digits, MSB-first: digit i @ (253-3i))
+                // WOTS+C digit sum == 205 (43 base-8 digits, MSB-first: digit i @ (253-3i))
                 let digitSum := 0
                 for { let ii := 0 } lt(ii, 43) { ii := add(ii, 1) } {
                     digitSum := add(digitSum, and(shr(sub(253, mul(3, ii)), d), 0x7))
                 }
-                if iszero(eq(digitSum, 203)) { mstore(0x00, 0) return(0x00, 0x20) }
+                if iszero(eq(digitSum, 205)) { mstore(0x00, 0) return(0x00, 0x20) }
 
                 // Complete 43 chains
                 let wotsPtr := add(sigBase, sigOff)
@@ -179,13 +190,13 @@ contract SphincsC11ShaAsm {
                 if iszero(staticcall(gas(), 0x02, 0x00, 0x306, 0x320, 0x20)) { revert(0, 0) }
                 let wotsPk := and(mload(0x320), N_MASK)
 
-                // Merkle climb (subtree_h = 8). TREE: type=2, layer @248, tree @184
+                // Merkle climb (subtree_h = 9). TREE: type=2, layer @248, tree @184
                 let authOff := add(countOff, 4)
                 let treeAdrs := or(shl(248, layer), or(shl(184, idxTree), shl(176, 2)))
                 let merkleNode := wotsPk
                 let mIdx := idxLeaf
                 let merklePtr := add(sigBase, authOff)
-                for { let hh := 0 } lt(hh, 8) { hh := add(hh, 1) } {
+                for { let hh := 0 } lt(hh, 9) { hh := add(hh, 1) } {
                     let sibling := and(calldataload(add(merklePtr, shl(4, hh))), N_MASK)
                     let parentIdx := shr(1, mIdx)
                     mstore(0x40, or(treeAdrs, or(shl(112, add(hh, 1)), shl(80, parentIdx))))
@@ -198,7 +209,7 @@ contract SphincsC11ShaAsm {
                 }
 
                 currentNode := merkleNode
-                sigOff := add(authOff, 128)   // subtree_h*N = 8*16
+                sigOff := add(authOff, 144)   // subtree_h*N = 9*16
             }
 
             valid := eq(currentNode, root)

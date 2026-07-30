@@ -22,6 +22,7 @@ There are different ways to construct the SPHINCS signature scheme. Existing lit
 | Variant | Family | h | d | a | k | w | l | swn | Sig | sign_h | Verify | Frame | 4337 | sec_10 | sec_14 | sec_18 | sec_20 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **C7** | WOTS+C / FORS+C | 24 | 2 | 16 | 8 | 8 | 43 | 151 | 3,704 B | 4.3 M | 127 K | 210 K | 318 K | 128 | 128 | 128 | 128 |
+| **C10** | WOTS+C / FORS+C | 18 | 2 | 11 | 13 | 8 | 43 | 205 | 4,008 B | 609 K | 115 K | 203 K | 308 K | 128 | 128 | 128 | 104.5 |
 | **C11** | WOTS+C / FORS+C | 16 | 2 | 11 | 13 | 8 | 43 | 203 | 3,976 B | 292 K | 116 K | 202 K | 308 K | 128 | 128 | 104.5 | 86.1 |
 | **C13** † | WOTS+C / FORS+C | 22 | 2 | 19 | 7 | 8 | 43 | 208 | 3,688 B | ~10 M | **105 K** | **188 K** | **293 K** | 128 | 128 | 128 | 128 |
 | **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 45 | - | 6,512 B | 36.6 K | 276 K | - | - | 128 | 127.8 | 109.1 | 95.4 |
@@ -89,11 +90,12 @@ SHA-256 + 22-byte ADRSc versions of the keccak verifiers, for deployments that p
 
 | Variant | Construction | FIPS? | Sig | Verify gas (harness) |
 |---|---|---|---|---|
+| **C10-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 4,008 B | ~475 K |
 | **C11-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 3,976 B | ~473 K |
 | **C13-SHA** | WOTS+C / FORS+C (minimal twin, one-shot H_msg) | No (counter-grinding) | 3,688 B | ~440 K |
 | **C12-SHA** | plain SPHINCS+, full FIPS 205 SLH-DSA-SHA2 (MGF1 H_msg, `0x00‖0x00` envelope, standard checksum) | Algorithm yes; params not a NIST set (no KAT) | 6,496 B | ~908 K |
 
-The compact twins (C11/C13) **cannot** be made FIPS-compliant — their WOTS+C/FORS+C counter-grinding has no FIPS 205 analog — so they only borrow the SHA-256 hash + ADRSc. C12 is plain SPHINCS+, so it takes the full FIPS algorithm. Vectors: `script/signer.py {c11-sha,c13-sha}` and `script/slh_dsa_sha2_c12_signer.py`.
+The compact twins (C10/C11/C13) **cannot** be made FIPS-compliant — their WOTS+C/FORS+C counter-grinding has no FIPS 205 analog — so they only borrow the SHA-256 hash + ADRSc. C12 is plain SPHINCS+, so it takes the full FIPS algorithm. Vectors: `script/signer.py {c10-sha,c11-sha,c13-sha}` and `script/slh_dsa_sha2_c12_signer.py`.
 
 ### Address layout
 

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 pragma solidity ^0.8.28;
 
 /// @title SLH-DSA-Keccak-128-24 — JARDIN-style Keccak variant of NIST SP 800-230

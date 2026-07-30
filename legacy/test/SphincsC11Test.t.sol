@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
@@ -17,7 +19,7 @@ contract SphincsC11Test is Test {
         string[] memory inputs = new string[](4);
         inputs[0] = "python3";
         inputs[1] = "script/signer.py";
-        inputs[2] = "c11";
+        inputs[2] = "c11-jardin";
         inputs[3] = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 
         bytes memory result = vm.ffi(inputs);
