@@ -9,7 +9,7 @@
   14. letVar "idxTree0" := shr(11, htIdx)       -- high 11 bits of htIdx
   15. letVar "forsBase" := or(shl(128, idxTree0),
                              or(shl(96, 3), shl(64, idxLeaf0)))
-                                                -- FIPS 205 §11.2.2 ADRS base
+                                                -- FIPS 205 §4.2 ADRS base
   ```
 
   These are pure binder writes: no guard, no memory, no calldata — the

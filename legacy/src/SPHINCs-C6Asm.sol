@@ -7,12 +7,28 @@ pragma solidity ^0.8.28;
 /// @dev C6: h=24, d=2, a=16, k=8, w=16, l=32, target_sum=240, sig_size=3352
 ///      Domain-separated H_msg (160 bytes).
 ///      Solady-style micro-optimizations: shl for power-of-2 mul, hoisted invariants.
+///
+///      FORS is bound to the per-message hypertree leaf: `htIdx` occupies the
+///      JARDIN `tree` field (bits 160..223) of every FORS_TREE / FORS_ROOTS
+///      address. Without it one FORS forest is shared by all 2^h positions, and
+///      since the WOTS/hypertree part of a signature only commits to the
+///      (message-independent) FORS public key, one signature at a position plus
+///      FORS secrets harvested from signatures at *other* positions forges a
+///      second message at that position. Same fix as C8/C10; the live
+///      `src/keccak/` verifiers get the equivalent from the FIPS 205 §4.2 split.
 contract SphincsC6Asm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external pure returns (bool valid)
     {
-        assembly ("memory-safe") {
+        // NOTE: this block intentionally uses Solidity's free-memory-pointer slot
+        // (0x40) and the zero slot (0x60) as scratch and writes high memory without
+        // updating the FMP. That is only sound because every exit below is an
+        // unconditional in-assembly `return`/`revert`, so Solidity never regains
+        // control with a clobbered FMP. It is therefore NOT `memory-safe` in the
+        // Yul sense — do not add the ("memory-safe") annotation and do not introduce
+        // a normal (fall-through) exit from this block. (matches C13, review C13-evm-f1)
+        assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
             if iszero(eq(sig.length, 3352)) {
@@ -20,6 +36,17 @@ contract SphincsC6Asm {
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
                 mstore(0x44, "Invalid sig length")
+                revert(0x00, 0x64)
+            }
+
+            // Reject non-canonical public keys (low 128 bits must be zero), mirroring
+            // the C13 verifier. A non-top-aligned pkRoot can never equal the
+            // always-N_MASK'd `currentNode`; fail loudly instead of silently.
+            if or(iszero(eq(pkSeed, and(pkSeed, N_MASK))), iszero(eq(pkRoot, and(pkRoot, N_MASK)))) {
+                mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
+                mstore(0x04, 0x20)
+                mstore(0x24, 18)
+                mstore(0x44, "Invalid public key")
                 revert(0x00, 0x64)
             }
 
@@ -42,15 +69,18 @@ contract SphincsC6Asm {
             if and(shr(112, dVal), 0xFFFF) { revert(0, 0) }
 
             let sigBase := sig.offset
+            // FORS ADRS base: tree=htIdx (position binding), type=3 (FORS_TREE).
+            // kp=FORS tree number, cp=height, ha=node index — unchanged.
+            let forsBase := or(shl(160, htIdx), shl(128, 3))
             for { let i := 0 } lt(i, 7) { i := add(i, 1) } {
                 let treeIdx := and(shr(shl(4, i), dVal), 0xFFFF)  // shl(4,i) = i*16
                 let secretVal := and(calldataload(add(sigBase, add(16, shl(4, i)))), N_MASK)
-                let leafAdrs := or(shl(128, 3), or(shl(96, i), treeIdx))
+                let leafAdrs := or(forsBase, or(shl(96, i), treeIdx))
                 mstore(0x20, leafAdrs)
                 mstore(0x40, secretVal)
                 let node := and(keccak256(0x00, 0x60), N_MASK)
 
-                let treeAdrsBase := or(shl(128, 3), shl(96, i))
+                let treeAdrsBase := or(forsBase, shl(96, i))
                 let pathIdx := treeIdx
                 // Hoist invariant: authPtr = sigBase + 144 + i*256
                 let authPtr := add(sigBase, add(144, shl(8, i)))  // shl(8,i) = i*256
@@ -71,13 +101,14 @@ contract SphincsC6Asm {
             // Last tree (forced-zero): secret = root hash
             {
                 let lastSecret := and(calldataload(add(sigBase, 128)), N_MASK)  // 16 + 7*16 = 128
-                mstore(0x20, or(shl(128, 3), shl(96, 7)))
+                mstore(0x20, or(forsBase, shl(96, 7)))
                 mstore(0x40, lastSecret)
                 mstore(0x160, and(keccak256(0x00, 0x60), N_MASK))  // 0x80 + 7*0x20 = 0x160
             }
 
             // Compress 8 FORS roots
-            mstore(0x20, shl(128, 4))
+            // FORS_ROOTS: tree=htIdx (position binding), type=4, kp=0.
+            mstore(0x20, or(shl(160, htIdx), shl(128, 4)))
             for { let i := 0 } lt(i, 8) { i := add(i, 1) } {
                 mstore(add(0x40, shl(5, i)), mload(add(0x80, shl(5, i))))
             }

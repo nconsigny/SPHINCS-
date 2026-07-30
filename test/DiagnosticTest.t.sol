@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/SLH-DSA-SHA2-128-24-Diagnostic.sol";
+import "../src/sha/SLH-DSA-SHA2-128-24-Diagnostic.sol";
 
 contract DiagnosticTest is Test {
     function testTree0Trace() public {

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Script.sol";
-import "../src/SLH-DSA-SHA2-128-24verifier.sol";
+import "../src/sha/SLH-DSA-SHA2-128-24verifier.sol";
 import "../legacy/src/SLH-DSA-keccak-128-24verifier.sol";
 
 /// @title DeploySlhDsa128_24Sepolia — Deploy the SLH-DSA-*-128-24 verifiers

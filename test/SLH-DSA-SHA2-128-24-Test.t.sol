@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/SLH-DSA-SHA2-128-24verifier.sol";
+import "../src/sha/SLH-DSA-SHA2-128-24verifier.sol";
 
 /// @notice End-to-end test of the FIPS 205 SLH-DSA-SHA2-128-24 verifier
 ///         against real signatures produced by our forked sphincsplus C

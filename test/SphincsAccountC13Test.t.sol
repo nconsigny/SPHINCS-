@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/SPHINCs-C13Asm.sol";
+import "../src/keccak/SPHINCs-C13Asm.sol";
 import "../src/SphincsAccount.sol";
 import "../src/SphincsAccountFactory.sol";
 import "account-abstraction/interfaces/IEntryPoint.sol";

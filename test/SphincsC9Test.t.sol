@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/SPHINCs-C9Asm.sol";
+import "../src/keccak/SPHINCs-C9Asm.sol";
 
 contract SphincsC9Test is Test {
     SphincsC9Asm verifier;

@@ -6,14 +6,22 @@ kept for reproducibility of prior benchmarks, as a reference for the
 ADRS / hash conventions they share with the current verifiers, and as an
 escape hatch if someone needs to redeploy an earlier variant.
 
-**C11, C12, and `SLH-DSA-keccak-128-24verifier.sol`** were retired here when the
-repo standardized on the two FIPS 205 ADRS layouts (uncompressed 32 B + keccak,
-ADRSc 22 B + SHA-2). They stayed on the JARDIN 32-byte ADRS layout, so rather
-than migrate their kernels they were frozen alongside C6/C8/C10. Their off-chain
-signers (`script/jardin_spx_signer.py`, `signers/jardin-keccak-128-24/`, and
-`script/signer.py` in JARDIN `adrs_mode`) and the keccak SLH-DSA deploy entry in
-`script/DeploySlhDsa128_24Sepolia.s.sol` are unchanged and still point at these
-files via `../legacy/src/`.
+**`SLH-DSA-keccak-128-24verifier.sol`** was retired here when the repo
+standardized on the two FIPS 205 ADRS layouts (uncompressed 32 B + keccak,
+ADRSc 22 B + SHA-2): it stayed on the JARDIN 32-byte ADRS layout and was never
+migrated.
+
+**C11 and C12 were migrated** to the FIPS uncompressed layout and now live in
+`src/` (`src/SPHINCs-C11Asm.sol`, `src/SPHINCs-C12Asm.sol`) as live verifiers.
+Their JARDIN-layout originals (`SPHINCs-C11Asm.sol`, `SPHINCs-C12Asm.sol` here)
+are kept frozen for benchmark reproducibility and because the JARDIN-layout
+C12 is cross-referenced verbatim by the JARDIN repo as `JardinSpxVerifier`.
+
+The JARDIN-mode off-chain signers (`script/jardin_spx_signer.py`,
+`signers/jardin-keccak-128-24/`, and `script/signer.py` in JARDIN `adrs_mode`)
+and the keccak SLH-DSA deploy entry in `script/DeploySlhDsa128_24Sepolia.s.sol`
+are unchanged and still point at these files via `../legacy/src/`. The migrated
+FIPS C12 has its own signer at `script/spx_fips_signer.py`.
 
 ## What's here
 

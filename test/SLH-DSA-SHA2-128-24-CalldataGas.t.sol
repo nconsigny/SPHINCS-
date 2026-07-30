@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/SLH-DSA-SHA2-128-24verifier.sol";
+import "../src/sha/SLH-DSA-SHA2-128-24verifier.sol";
 
 /// @notice Gas measurement that passes the signature in calldata (not from
 ///         storage), so the number reflects the verifier alone, not the

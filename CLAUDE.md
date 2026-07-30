@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SPHINCs- is a research prototype for lightweight SPHINCS+ variants on Ethereum. Three families of on-chain verifiers live here:
+SPHINCs- is a research prototype for lightweight SPHINCS+ variants on Ethereum. Live verifiers in `src/` are organized **one folder per hash function**: `src/keccak/` (keccak256 opcode), `src/sha/` (SHA-256 precompile 0x02), and `src/blake/` (BLAKE2b via the BLAKE2F compression precompile 0x09). Accounts live in `src/` root. The families:
 
-1. **C-series** (C7, C9, **C13** in `src/`; C6/C8/C10/C11 in `legacy/src/`) — stateless WOTS+C / FORS+C (ePrint 2025/2203), n=128. Signature-count cap = 2^h (C7 → 2²⁴, C13 → 2²², C11 → 2¹⁶); security degrades with N as shown in the variants table in the README. **Every live `src/` C-series verifier (C7, C9, C13) uses the FIPS 205 §11.2.2 uncompressed 32-byte ADRS layout** (see "ADRS layout discipline" below). C11 stayed on JARDIN's 32-byte ADRS and is now retired to `legacy/`.
-2. **C12** (`legacy/src/SPHINCs-C12Asm.sol`, retired) — plain SPHINCS+ (SPX) variant of the SPHINCs- family, with the JARDIN 32-byte ADRS kernel + keccak256 truncated to 16 B. h=20, d=5, a=7, k=20, w=8, l=45. 6,512-B sig, ~276 K verify gas. Cross-referenced by the JARDIN repo as `JardinSpxVerifier`. Retired to `legacy/` because the repo now ships only the two FIPS ADRS layouts in `src/`.
-3. **SLH-DSA-128-24** — NIST SP 800-230 parameter set (d=1, h=22, a=24, k=6, w=4). Two variants:
-   - FIPS 205 **external** SLH-DSA-SHA2 (`src/SLH-DSA-SHA2-128-24verifier.sol`), empty-context envelope (`M' = 0x00‖0x00‖M`); uses the SHA-256 precompile at 0x02. Matches NIST/ACVP external KATs.
-   - JARDIN-convention Keccak twin (`legacy/src/SLH-DSA-keccak-128-24verifier.sol`, retired), uses the native `keccak256` opcode. Retired to `legacy/` alongside the other JARDIN-layout verifiers; the SHA-2 variant is the live one.
+1. **C-series** (`src/keccak/`: C7, C9, **C11**, **C13**; C6/C8/C10 in `legacy/src/`) — stateless WOTS+C / FORS+C (ePrint 2025/2203), n=128. Signature-count cap = 2^h (C7 → 2²⁴, C13 → 2²², C11 → 2¹⁶); security degrades with N as shown in the variants table in the README. **Every live keccak C-series verifier uses the FIPS 205 §4.2 uncompressed 32-byte ADRS layout** (the SHAKE-instantiation form, §11.1; keccak256 swapped for SHAKE256 — see "ADRS layout discipline" below). C11 was migrated from JARDIN's 32-byte ADRS to FIPS uncompressed; its JARDIN-layout original is kept in `legacy/src/` for benchmark reproducibility.
+2. **C12** (`src/keccak/SPHINCs-C12Asm.sol`) — plain SPHINCS+ (SPX) variant. h=20, d=5, a=7, k=20, w=8, l=45. 6,512-B sig. Migrated from the JARDIN 32-byte ADRS to the FIPS uncompressed 32-byte ADRS + keccak256 truncated to 16 B. The JARDIN-layout original stays in `legacy/src/SPHINCs-C12Asm.sol`, cross-referenced by the JARDIN repo as `JardinSpxVerifier`. Its FIPS signer is `script/spx_fips_signer.py`.
+3. **SHA-256 twins** (`src/sha/`: `SPHINCs-C11-SHA.sol`, `SPHINCs-C13-SHA.sol`, `SPHINCs-C12-SHA.sol`) — SHA-256 + 22-byte ADRSc versions of C11/C13/C12. The hash and address change *as a coupled unit* (SHA-256 precompile; FIPS §11.2 compressed ADRSc; MSB-first `base_2b` parsing). **C11-SHA / C13-SHA are "minimal twins"** — same WOTS+C/FORS+C counter-grinding and one-shot H_msg as their keccak originals, NOT FIPS (no MGF1, no envelope). **C12-SHA is full FIPS 205 SLH-DSA-SHA2** (plain SPHINCS+ can take it): MGF1 H_msg, `0x00‖0x00` empty-context envelope, standard checksum — a true SLH-DSA algorithm at research params (not a NIST set, so no KAT match). R is n=16 B on the wire ⇒ 6,496-B sig. Vectors: `script/signer.py {c11-sha,c13-sha}` and `script/slh_dsa_sha2_c12_signer.py`.
+4. **BLAKE2b twins** (`src/blake/`: `SPHINCs-C11-BLAKE.sol`, `SPHINCs-C13-BLAKE.sol`, `SPHINCs-C12-BLAKE.sol`) — BLAKE2b versions of C11/C13/C12 that **reuse the keccak FIPS uncompressed 32-byte ADRS verbatim**; only the hash primitive changes (keccak256 → BLAKE2b). These are *minimal twins* of the keccak C-series (same WOTS+C/FORS+C and one-shot H_msg for C11/C13; same plain-SPHINCS+ for C12), **NOT FIPS** (BLAKE2b has no FIPS 205 instantiation). The on-chain hash is built on the **BLAKE2F compression precompile 0x09** (EIP-152) — *not* a hash but BLAKE2b's compression `F`, so each verifier carries a `blake2b()` Yul kernel that wraps it with the BLAKE2b construction (IV/param-block init, 128-byte block loop, LE↔BE lane bridging). F/H/T use a 16-byte digest; H_msg and the WOTS+C message digest use 32 bytes. Verifiers are `view` (the precompile is a staticcall). Same sig sizes as the keccak originals (3,976 / 6,512 / 3,688 B); verify gas is far higher (~3.1M C11, ~7.9M C12, ~2.8M C13) — inherent to a compression-only precompile + endianness handling. Vectors: `script/signer.py {c11-blake,c13-blake}` (C-series) and `script/spx_blake_signer.py` (C12). The BLAKE2b kernel is independently KAT-validated against `hashlib.blake2b` in `test/Blake2bKernelTest.t.sol`.
+5. **SLH-DSA-128-24** — NIST SP 800-230 parameter set (d=1, h=22, a=24, k=6, w=4). Two variants:
+   - FIPS 205 **external** SLH-DSA-SHA2 (`src/sha/SLH-DSA-SHA2-128-24verifier.sol`), empty-context envelope (`M' = 0x00‖0x00‖M`); SHA-256 precompile at 0x02. Matches NIST/ACVP external KATs.
+   - JARDIN-convention Keccak twin (`legacy/src/SLH-DSA-keccak-128-24verifier.sol`, retired), native `keccak256`. Retired to `legacy/` alongside the other JARDIN-layout verifiers; the SHA-2 variant is the live one.
 
 Accounts present in this repo use the C-series: `SphincsAccount` (ERC-4337), `SphincsAccountFactory`, `SphincsFrameAccount` (EIP-8141). The JARDIN hybrid-account stack (ECDSA + SPHINCs-) lives in the separate [nconsigny/JARDIN](https://github.com/nconsigny/JARDIN) repo.
 
@@ -30,6 +32,17 @@ cd signer-wasm && cargo test --release -- --ignored     # Rust C-series signer (
 # Forge FFI end-to-end tests (first run triggers a real sign; cache hits after):
 forge test --match-contract SLH_DSA_SHA2_128_24_Test   -vv
 forge test --match-contract SLH_DSA_Keccak_128_24_Test -vv
+
+# SHA-256 twins (Python signers, no C build needed; C13-SHA ~40s to sign):
+forge test --match-contract SphincsC11ShaTest -vv     # SHA twin of C11
+forge test --match-contract SphincsC13ShaTest -vv     # SHA twin of C13
+forge test --match-contract SphincsC12ShaTest -vv     # full-FIPS SLH-DSA-SHA2 at C12 params
+
+# BLAKE2b twins (Python signers; BLAKE2F precompile 0x09; C13-BLAKE ~50s to sign):
+forge test --match-contract Blake2bKernelTest -vv      # BLAKE2b-over-0x09 kernel KATs (no signer)
+forge test --match-contract SphincsC11BlakeTest -vv    # BLAKE2b twin of C11
+forge test --match-contract SphincsC13BlakeTest -vv    # BLAKE2b twin of C13
+forge test --match-contract SphincsC12BlakeTest -vv    # BLAKE2b twin of plain-SPHINCS+ C12
 ```
 
 Python env: `pip install eth-account eth-abi requests pycryptodome`.
@@ -53,7 +66,7 @@ Every verifier is deployed once as a stateless pure contract and shared by all a
 Every verifier in `src/` now uses **one of only two address layouts**; the JARDIN
 32-byte layout has been retired to `legacy/` (see "Retired layout" below):
 
-1. **FIPS 205 §11.2.2 uncompressed 32-byte ADRS** + keccak256 — the SHAKE-instantiation form with keccak swapped in for SHAKE-256. Layout: `layer(4) ‖ tree(12) ‖ type(4) ‖ word1(4) ‖ word2(4) ‖ word3(4)`. Word semantics per type (FIPS 205 Table 1):
+1. **FIPS 205 §4.2 uncompressed 32-byte ADRS** + keccak256 — the SHAKE-instantiation form with keccak swapped in for SHAKE-256. Layout: `layer(4) ‖ tree(12) ‖ type(4) ‖ word1(4) ‖ word2(4) ‖ word3(4)`. Word semantics per type (FIPS 205 Table 1):
    - 0 WOTS_HASH:  word1=kp, word2=chain_address, word3=hash_address
    - 1 WOTS_PK:    word1=kp, word2=0, word3=0
    - 2 TREE:       word1=0, word2=tree_height, word3=tree_index
@@ -62,36 +75,62 @@ Every verifier in `src/` now uses **one of only two address layouts**; the JARDI
 2. **FIPS 205 §11.2.1 ADRSc (22 B compressed)** + SHA-256 (precompile 0x02) — required for the FIPS-SHA2 instantiation; smaller because SHA-2 block size benefits from packing.
 
 Current users (everything in `src/`):
-- **C7, C9, C13**: FIPS uncompressed 32 B + keccak256 (C13 was first on this layout; C7/C9 migrated from JARDIN). FORS is keyed by the per-message hypertree leaf via the FIPS field split — tree=idxTree0, kp=idxLeaf0, FORS tree number folded into tree_index.
-- **SLH-DSA-SHA2-128-24**: FIPS ADRSc 22 B + SHA-256.
+- **`src/keccak/` C7, C9, C11, C13**: FIPS uncompressed 32 B + keccak256 (C13 was first on this layout; C7/C9 migrated from JARDIN, then C11). FORS is keyed by the per-message hypertree leaf via the FIPS field split — tree=idxTree0, kp=idxLeaf0, FORS tree number folded into tree_index.
+- **`src/keccak/` C12**: FIPS uncompressed 32 B + keccak256, plain SPHINCS+ (d=5 hypertree, standard WOTS+ checksum). XMSS_TREE uses word2=height, word3=tree_index per FIPS Table 1.
+- **`src/sha/` C11-SHA, C13-SHA, C12-SHA, and SLH-DSA-SHA2-128-24**: FIPS §11.2 ADRSc 22 B + SHA-256. All share the `SHA-256(seed‖toByte(0,48)‖ADRSc‖payload)` framing and MSB-first parsing. C11-SHA/C13-SHA keep the compact construction (counter-grinding, one-shot H_msg — not FIPS); C12-SHA and SLH-DSA-SHA2 are full FIPS (MGF1 H_msg, empty-context envelope). The ADRSc field semantics (word1/word2/word3 per type) are identical to the uncompressed layout — only layer (4→1 B) and tree (12→8 B) are compressed.
+
+The two ADRS *byte layouts* in `src/` are therefore still just two (FIPS uncompressed 32 B for keccak, FIPS ADRSc 22 B for SHA-2); the SHA twins reuse the existing ADRSc.
 
 Retired layout (`legacy/`, frozen — not maintained):
-- **C11, C12, SLH-DSA-Keccak-128-24**: the older JARDIN 32 B layout (`layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4`) + keccak256. These were moved to `legacy/src/` rather than migrated — the repo deliberately ships only the two FIPS ADRS layouts.
+- **SLH-DSA-Keccak-128-24**, plus the JARDIN-layout **C11/C12 originals**: the older JARDIN 32 B layout (`layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4`) + keccak256. The keccak SLH-DSA twin was never migrated; the C11/C12 JARDIN originals are kept frozen for benchmark reproducibility and (C12) for the JARDIN repo's `JardinSpxVerifier` reference, while their migrated FIPS twins are the live `src/` verifiers.
 
 JARDIN's structural divergence from FIPS uncompressed is a shorter tree field (8 B vs 12 B) and a 4th type-dependent word (`ha`) that is never actually populated by any type. The visible difference between layouts is that JARDIN's `ci` (chain_index, WOTS-only) and `cp`/`ha` (height/index, TREE-only) live at distinct byte positions; FIPS overloads `word2` and `word3` per type. Both layouts are sound; FIPS is the cross-impl interop choice.
 
-**New keccak-family verifiers MUST use FIPS uncompressed** — JARDIN is a frozen legacy layout, not an option for new work. The JARDIN-aware signers in `script/signer.py` (`cfg["adrs_mode"]` defaulting to JARDIN) still drive the retired C11/legacy paths; live C7/C9/C13 set `cfg["adrs_mode"]="fips"`, and `signer-wasm` is C13-only. Only touch JARDIN ADRS code to keep a `legacy/` verifier reproducible.
+**New keccak-family verifiers MUST use FIPS uncompressed** — JARDIN is a frozen legacy layout, not an option for new work. The JARDIN-aware signers in `script/signer.py` (`cfg["adrs_mode"]` defaulting to JARDIN) still drive the legacy C6/C8/C10 paths; live C7/C9/C11/C13 set `cfg["adrs_mode"]="fips"`, and `signer-wasm` is C13-only. The plain-SPX C12 FIPS signer is `script/spx_fips_signer.py` (wraps the shared `jardin_spx_signer.py`). Only touch JARDIN ADRS code to keep a `legacy/` verifier reproducible.
 
 ### Shared hash kernel (legacy phrasing, kept for context)
 
-The retired **C-series (pre-C13), C12, and SLH-DSA-Keccak** verifiers in `legacy/` share the JARDIN kernel: one 32-byte ADRS layout and the `keccak(seed32 ‖ adrs32 ‖ inputs)` tweakable-hash shape (see `script/jardin_primitives.py`). A device port covers those with a single `sphincs_th*` implementation. The live verifiers split into two kernels: **SLH-DSA-SHA2-128-24** uses FIPS 205's 22-byte compressed ADRSc + SHA-256 with the nested MGF1 Hmsg, in **external** mode (empty-context envelope `M' = 0x00‖0x00‖M`); **C7, C9, C13** use FIPS uncompressed 32 B ADRS + keccak256 — the canonical keccak-family layout now that the JARDIN verifiers are retired.
+The legacy **C-series (C6/C8/C10) and SLH-DSA-Keccak** verifiers in `legacy/` share the JARDIN kernel: one 32-byte ADRS layout and the `keccak(seed32 ‖ adrs32 ‖ inputs)` tweakable-hash shape (see `script/jardin_primitives.py`). A device port covers those with a single `sphincs_th*` implementation. The live verifiers split into two kernels: **SLH-DSA-SHA2-128-24** uses FIPS 205's 22-byte compressed ADRSc + SHA-256 with the nested MGF1 Hmsg, in **external** mode (empty-context envelope `M' = 0x00‖0x00‖M`); **C7, C9, C11, C12, C13** use FIPS uncompressed 32 B ADRS + keccak256 — the canonical keccak-family layout now that the C-series has all migrated off JARDIN.
 
 ### Current contracts (`src/`)
+
+Verifiers are split by hash function: `src/keccak/` and `src/sha/`. Accounts stay in `src/` root (they reference a verifier by address, no import dependency).
+
+**`src/keccak/`** (keccak256 opcode, FIPS uncompressed 32-byte ADRS):
 
 | File | Purpose |
 |---|---|
 | `SPHINCs-C7Asm.sol` | C-series verifier, stateless, n=128, h=24 d=2 a=16 k=8 w=8. 3,704-B sig, ~127 K verify |
 | `SPHINCs-C9Asm.sol` | C-series verifier, stateless, n=128, h=20 d=2 a=12 k=11 w=8. 3,816-B sig, ~117 K verify |
-| `SPHINCs-C13Asm.sol` | C-series verifier, stateless, n=128, h=22 d=2 a=19 k=7 w=8. 3,688-B sig. **FIPS 205 §11.2.2 uncompressed 32-byte ADRS + keccak256** (first verifier on this layout). |
-| `SphincsAccount.sol` | ERC-4337 hybrid account (ECDSA + SPHINCs- C-series), verifier pluggable via immutable |
-| `SphincsAccountFactory.sol` | CREATE2 factory for `SphincsAccount` |
-| `SphincsFrameAccount.sol` | EIP-8141 pure-PQ frame account; keys embedded in bytecode (no SLOAD) |
-| `SLH-DSA-SHA2-128-24verifier.sol` | FIPS 205 **external** SLH-DSA-SHA2-128-24 verifier (empty-ctx envelope `0x00‖0x00‖M`; SHA-256 precompile) |
+| `SPHINCs-C11Asm.sol` | C-series verifier, n=128, h=16 d=2 a=11 k=13 w=8. 3,976-B sig, ~116 K verify. ~86-bit at 2²⁰ cap — prefer C13 when verify-time security matters. |
+| `SPHINCs-C12Asm.sol` | Plain SPHINCS+ (SPX) verifier, n=16, h=20 d=5 a=7 k=20 w=8 l=45. 6,512-B sig, ~717 K verify. JARDIN original kept in `legacy/src/` as `JardinSpxVerifier`. |
+| `SPHINCs-C13Asm.sol` | C-series verifier, n=128, h=22 d=2 a=19 k=7 w=8. 3,688-B sig, ~105 K verify (cheapest at 128-bit). First verifier on the FIPS uncompressed layout. |
+
+**`src/sha/`** (SHA-256 precompile 0x02, FIPS §11.2 compressed 22-byte ADRSc):
+
+| File | Purpose |
+|---|---|
+| `SPHINCs-C11-SHA.sol` | SHA-256 "minimal twin" of C11 (WOTS+C/FORS+C kept, one-shot H_msg, MSB-first). ~473 K verify. Not FIPS. |
+| `SPHINCs-C13-SHA.sol` | SHA-256 "minimal twin" of C13. ~440 K verify. Not FIPS. |
+| `SPHINCs-C12-SHA.sol` | **Full FIPS 205 SLH-DSA-SHA2** at C12 params (MGF1 H_msg, `0x00‖0x00` envelope, MSB-first base_2b, standard checksum). 6,496-B sig (R=16 B), ~908 K verify. Research params, not a NIST set. |
+| `SLH-DSA-SHA2-128-24verifier.sol` | FIPS 205 **external** SLH-DSA-SHA2-128-24 verifier (empty-ctx envelope; SHA-256 precompile). Matches NIST/ACVP KATs. |
 | `SLH-DSA-SHA2-128-24-Diagnostic.sol` | Debug tool used to bisect the SHA-2 verifier during development |
+
+**`src/blake/`** (BLAKE2b via the BLAKE2F compression precompile 0x09; reuses the FIPS uncompressed 32-byte ADRS, `view` not `pure`):
+
+| File | Purpose |
+|---|---|
+| `SPHINCs-C11-BLAKE.sol` | BLAKE2b "minimal twin" of C11 (WOTS+C/FORS+C, one-shot H_msg). 3,976-B sig, ~3.07 M verify. Not FIPS. |
+| `SPHINCs-C13-BLAKE.sol` | BLAKE2b "minimal twin" of C13. 3,688-B sig, ~2.84 M verify. Not FIPS. |
+| `SPHINCs-C12-BLAKE.sol` | BLAKE2b twin of the plain-SPHINCS+ C12 (standard WOTS+ checksum, d=5). 6,512-B sig, ~7.9 M verify. Not FIPS. |
+
+Each carries a `blake2b(ptr,len,nn)` Yul kernel wrapping the 0x09 compression `F` (the precompile is **not** a hash). The kernel is KAT-validated against `hashlib.blake2b` in `test/Blake2bKernelTest.t.sol`; kernel scratch is at memory `0x800+` (clear of the SPHINCS+ working set ≤ `0x620`), preimages are read from `0x00`. Verify gas is ~10–25× the keccak originals — inherent to a compression-only precompile + per-call LE↔BE lane swaps + multi-block compression on the large T_l input.
+
+**`src/`** (accounts): `SphincsAccount.sol` (ERC-4337 hybrid ECDSA + SPHINCs-, verifier pluggable via immutable), `SphincsAccountFactory.sol` (CREATE2 factory), `SphincsFrameAccount.sol` (EIP-8141 pure-PQ, keys in bytecode).
 
 ### Frozen variants (`legacy/`)
 
-Prior C-series verifiers (C6, C8, C10) kept for benchmark reproducibility. Same 32-byte ADRS kernel, different parameters. **C11, C12, and SLH-DSA-Keccak-128-24 were retired here too** — they stayed on the JARDIN 32-byte ADRS layout while the repo standardized on the two FIPS layouts, so rather than migrate their kernels they were frozen alongside C6/C8/C10. Their Forge tests live in `legacy/test/` (outside the default `forge test` path) and their off-chain signers (`script/jardin_spx_signer.py`, `signers/jardin-keccak-128-24/`, `script/signer.py` JARDIN mode) are unchanged. See `legacy/README.md`.
+Prior C-series verifiers (C6, C8, C10) kept for benchmark reproducibility. Same 32-byte ADRS kernel, different parameters. **SLH-DSA-Keccak-128-24** is frozen here too — it stayed on the JARDIN 32-byte ADRS layout while the repo standardized on the two FIPS layouts. The **JARDIN-layout C11/C12 originals** also remain here: C11 and C12 were migrated to FIPS uncompressed in `src/`, but their JARDIN versions are kept frozen for benchmark reproducibility and (C12) for the JARDIN repo's `JardinSpxVerifier` reference. Legacy Forge tests live in `legacy/test/` (outside the default `forge test` path) and the JARDIN-mode off-chain signers (`script/jardin_spx_signer.py`, `signers/jardin-keccak-128-24/`, `script/signer.py` JARDIN mode) are unchanged. See `legacy/README.md`.
 
 | Variant | h | d | a | k | w | swn | Sig | sign_h | Verify | Frame | 4337 | sec_20 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -130,12 +169,15 @@ So a desktop-class signer that holds the XMSS tree in RAM amortises keygen acros
 
 ### C-series signers
 
-- `script/signer.py` — Python SPHINCs- C-series signer (C6–C11 all supported; slow, ~30 s per C6 sig)
+- `script/signer.py` — Python SPHINCs- C-series signer (C6–C13 all supported; live C7/C9/C11/C13 in FIPS ADRS mode, legacy C6/C8/C10 in JARDIN mode; slow, ~30 s per C6 sig). **SHA-256 twins** `c11-sha` / `c13-sha` are gated by `cfg["hash"]="sha2"` + `adrs_mode="adrsc"` + `parse="msb"`; **BLAKE2b twins** `c11-blake` / `c13-blake` by `cfg["hash"]="blake2"` + `adrs_mode="fips"` (default LSB parse). The keccak path is byte-identical when no `hash` flag is set. A `verify_c_series` mirror self-checks every signature (all three backends) before output. **Backend dispatch must be total:** all tweakable-hash helpers — `th`/`th_pair`/`th_multi`/`wots_digest`/`h_msg` *and* the FIPS chain hash `chain_hash_fips` — route through the `HASH_BACKEND` switch. (`chain_hash_fips` previously hardcoded keccak, which the `verify_c_series` self-check could not catch — both Python sides shared the bug — but diverged from the BLAKE2b verifier. For keccak, `th()` ≡ the old `_keccak_3x32 & N_MASK`, so that fix is behavior-preserving for C7/C9/C11/C13.)
 - `signer-wasm/` — Rust/WASM C-series signer with BIP-39/44 key derivation
 
 ### C12 (plain SPHINCS+) signer
 
-- `script/jardin_spx_signer.py` — Python signer for C12 (plain SPHINCS+, h=20, d=5, w=8). Self-contained; uses `jardin_primitives.py` for ADRS + tweakable hashes. Name kept as `jardin_spx_signer.py` because the same file is shared with the JARDIN repo's hybrid-account stack.
+- `script/spx_fips_signer.py` — Python signer for the **keccak FIPS-layout C12** (`src/keccak/SPHINCs-C12Asm.sol`). Thin wrapper that imports `jardin_spx_signer.py` and monkeypatches `make_adrs` to the FIPS 205 uncompressed constructor. Used by `test/SphincsC12Test.t.sol`.
+- `script/slh_dsa_sha2_c12_signer.py` — Python signer for the **full-FIPS C12-SHA** (`src/sha/SPHINCs-C12-SHA.sol`). The d=5 generalisation of `slh_dsa_sha2_128_24_signer.py` at C12 params (w=8): SHA-256 + ADRSc, MGF1 H_msg, `0x00‖0x00` envelope, MSB-first base_2b. Self-contained, with a local `slh_verify`. R=16 B ⇒ 6,496-B sig. Used by `test/SphincsC12ShaTest.t.sol`.
+- `script/jardin_spx_signer.py` — Python signer for the **legacy JARDIN-layout C12** (`legacy/src/SPHINCs-C12Asm.sol`, plain SPHINCS+, h=20, d=5, w=8). Self-contained; uses `jardin_primitives.py` for ADRS + tweakable hashes. Name kept as `jardin_spx_signer.py` because the same file is shared verbatim with the JARDIN repo's hybrid-account stack — do not change its output.
+- `script/spx_blake_signer.py` — Python signer for the **BLAKE2b C12** (`src/blake/SPHINCs-C12-BLAKE.sol`). Like `spx_fips_signer.py` it imports `jardin_spx_signer.py` and monkeypatches `make_adrs` to the FIPS constructor, and additionally swaps the tweakable hashes `F`/`H_`/`T_l`/`T_k`/`h_msg` for `hashlib.blake2b` (16-byte F/H/T, 32-byte H_msg, domain `0xFF..FC`). The PRFs (`wots_secret`/`fors_secret`/`derive_R`) stay keccak — signer-only, never recomputed by the verifier. Used by `test/SphincsC12BlakeTest.t.sol`.
 
 ### SLH-DSA-128-24 signers
 

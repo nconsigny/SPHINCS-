@@ -5,7 +5,7 @@ pragma solidity ^0.8.28;
 /// @notice C7: W+C_F+C h=24 d=2 a=16 k=8 w=8 l=43 target_sum=151 sig=3704
 ///         Same FORS+C as C6 but with w=8 WOTS chains: fewer hash steps per chain (7 vs 15),
 ///         more chains (43 vs 32), trading +352 bytes sig for ~20% less compute.
-/// @dev    Uses the FIPS 205 §11.2.2 uncompressed 32-byte ADRS (as C13). FORS is keyed by the
+/// @dev    Uses the FIPS 205 §4.2 uncompressed 32-byte ADRS (as C13). FORS is keyed by the
 ///         per-message hypertree leaf via the exact FIPS field split — tree=idxTree0,
 ///         kp=idxLeaf0, tree_index folds in the FORS tree number ((forsTree<<(A-height))|node).
 ///         Domain-separated H_msg (160 bytes).
@@ -15,7 +15,14 @@ contract SphincsC7Asm {
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
         external pure returns (bool valid)
     {
-        assembly ("memory-safe") {
+        // NOTE: this block intentionally uses Solidity's free-memory-pointer slot
+        // (0x40) and the zero slot (0x60) as scratch and writes high memory without
+        // updating the FMP. That is only sound because every exit below is an
+        // unconditional in-assembly `return`/`revert`, so Solidity never regains
+        // control with a clobbered FMP. It is therefore NOT `memory-safe` in the
+        // Yul sense — do not add the ("memory-safe") annotation and do not introduce
+        // a normal (fall-through) exit from this block. (matches C13, review C13-evm-f1)
+        assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
 
             if iszero(eq(sig.length, 3704)) {
@@ -23,6 +30,19 @@ contract SphincsC7Asm {
                 mstore(0x04, 0x20)
                 mstore(0x24, 18)
                 mstore(0x44, "Invalid sig length")
+                revert(0x00, 0x64)
+            }
+
+            // Reject non-canonical public keys (low 128 bits must be zero), mirroring
+            // the C13 verifier and the SHA-2 / BLAKE2b twins. Without this a
+            // non-top-aligned pkRoot can never equal the always-N_MASK'd `currentNode`,
+            // silently bricking the account, and pkSeed would diverge from the signer,
+            // which always masks. Fail loudly instead.
+            if or(iszero(eq(pkSeed, and(pkSeed, N_MASK))), iszero(eq(pkRoot, and(pkRoot, N_MASK)))) {
+                mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
+                mstore(0x04, 0x20)
+                mstore(0x24, 18)
+                mstore(0x44, "Invalid public key")
                 revert(0x00, 0x64)
             }
 
