@@ -85,10 +85,8 @@ contract SphincsFrameAccountC13Test is Test {
 
     // ── execute() access control ───────────────────────────────────────────
     //
-    // `execute` previously had NO caller check: any address could call it and
-    // move the account's ETH or make arbitrary calls as the account. It is now
-    // self-call-only (the SENDER-frame context, reached after the VERIFY frame
-    // has checked the SPHINCS+ signature).
+    // `execute` is self-call-only: the SENDER-frame context, reachable only after
+    // the VERIFY frame has checked the SPHINCS+ signature.
 
     function _canonicalFrame() internal returns (SphincsFrameAccount) {
         return _newFrame(bytes32(uint256(1) << 128), bytes32(uint256(2) << 128));

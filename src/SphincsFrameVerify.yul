@@ -22,9 +22,7 @@
 ///   · "SLOAD can be used only to access tx.sender storage, including when
 ///      reached transitively via CALL* or DELEGATECALL."
 ///
-/// WHAT IT FIXES. The legacy entry point takes `sigHash` from frame calldata,
-/// so a witness is reusable for any transaction presenting the same digest.
-/// Here the digest comes from TXPARAM(0x08) = compute_sig_hash(tx) and the
+/// INPUTS. The digest comes from TXPARAM(0x08) = compute_sig_hash(tx) and the
 /// witness from an ARBITRARY entry of tx.signatures via SIGPARAM — the shape the
 /// spec mandates: "Bespoke signature schemes must place their witness bytes in
 /// an ARBITRARY signature entry rather than in frame data when the witness signs

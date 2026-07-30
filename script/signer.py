@@ -47,7 +47,7 @@ VARIANTS = {
     "c6": {"h": 24, "d": 2, "k": 8, "a": 16, "m_max": 0, "scheme": "fors",
             "subtree_h": 12, "sig_size": 3352,
             # See the c10 note: FORS bound to the hypertree leaf via the JARDIN
-            # `tree` field, matching the fixed legacy/src/SPHINCs-C6Asm.sol.
+            # `tree` field, matching legacy/src/SPHINCs-C6Asm.sol.
             "fors_bind_ht_tree": True},
     "c7": {"h": 24, "d": 2, "k": 8, "a": 16, "m_max": 0, "scheme": "fors",
             "subtree_h": 12, "sig_size": 3704,
@@ -58,7 +58,7 @@ VARIANTS = {
             "subtree_h": 10, "sig_size": 3848,
             "w": 16, "log_w": 4, "l": 32, "len1": 32, "target_sum": 162, "w_mask": 0xF,
             # See the c10 note: FORS bound to the hypertree leaf via the JARDIN
-            # `tree` field, matching the fixed legacy/src/SPHINCs-C8Asm.sol.
+            # `tree` field, matching legacy/src/SPHINCs-C8Asm.sol.
             "fors_bind_ht_tree": True},
     "c9": {"h": 20, "d": 2, "k": 11, "a": 12, "m_max": 0, "scheme": "fors",
             "subtree_h": 10, "sig_size": 3816,
@@ -68,17 +68,14 @@ VARIANTS = {
     "c10": {"h": 18, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 9, "sig_size": 4008,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 205, "w_mask": 0x7,
-            # Legacy JARDIN ADRS kept, but FORS is bound to the per-message
-            # hypertree leaf via the JARDIN `tree` field (kp stays the FORS tree
-            # number, ha stays the node index). Mirrors the fixed
-            # legacy/src/SPHINCs-C10Asm.sol and EthereumPhone/PQ1's SPHINCsC10Asm.
+            # Legacy JARDIN ADRS, with FORS bound to the per-message hypertree leaf
+            # via the JARDIN `tree` field (kp stays the FORS tree number, ha stays the
+            # node index). Matches legacy/src/SPHINCs-C10Asm.sol.
             "fors_bind_ht_tree": True},
-    # C10 promoted out of legacy/. Two live twins, each on the ADRS layout its hash
-    # requires (FIPS 205 §11.1 SHAKE-position for keccak, §11.2 ADRSc for SHA-2).
-    # NOTE: "c10" above stays JARDIN — it drives legacy/src/SPHINCs-C10Asm.sol, which
-    # is still tested and tracked downstream by EthereumPhone/PQ1. Do NOT flip it:
-    # that is exactly what orphaned legacy/test/SphincsC11Test.t.sol when C11 was
-    # promoted (its `signer.py c11` now emits FIPS vectors a JARDIN verifier rejects).
+    # C10 has two live twins, each on the ADRS layout its hash requires (FIPS 205
+    # §11.1 SHAKE-position for keccak, §11.2 ADRSc for SHA-2). "c10" above stays
+    # JARDIN and drives legacy/src/SPHINCs-C10Asm.sol, which has its own test — keep
+    # the entries separate, since one entry cannot serve two ADRS layouts.
     "c10-fips": {"h": 18, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 9, "sig_size": 4008,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 205, "w_mask": 0x7,
@@ -97,9 +94,8 @@ VARIANTS = {
     # Drives the frozen legacy/src/SPHINCs-C11Asm.sol. That verifier uses the FIPS
     # FORS *field split* (tree=idxTree0, kp=idxLeaf0, tree_index=(t<<(A-h))|node) but
     # in JARDIN *byte positions* (tree@160, type@128, kp@96, cp@32, ha@0) — so it needs
-    # fors_bind_leaf WITHOUT adrs_mode. This entry exists because "c11" was flipped to
-    # adrs_mode="fips" during the C11 promotion, which left legacy/test/SphincsC11Test
-    # feeding FIPS-layout vectors to a JARDIN-layout verifier: it could not pass.
+    # fors_bind_leaf WITHOUT adrs_mode. Separate from "c11", which is on the FIPS
+    # layout for src/keccak/.
     "c11-jardin": {"h": 16, "d": 2, "k": 13, "a": 11, "m_max": 0, "scheme": "fors",
             "subtree_h": 8, "sig_size": 3976,
             "w": 8, "log_w": 3, "l": 43, "len1": 43, "target_sum": 203, "w_mask": 0x7,

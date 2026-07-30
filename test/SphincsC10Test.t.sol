@@ -6,11 +6,11 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import "../src/keccak/SPHINCs-C10Asm.sol";
 
-/// @dev End-to-end FFI test for C10 promoted out of legacy/ onto the FIPS 205 §4.2
-///      uncompressed 32-byte ADRS + keccak256. Vectors from `script/signer.py
-///      c10-fips`; the JARDIN-layout original is still covered separately by
-///      legacy/test/SphincsC10Test.t.sol driven by `signer.py c10`, and the two must
-///      NOT be fed each other's vectors.
+/// @dev End-to-end FFI test for the C10 verifier on the FIPS 205 §4.2 uncompressed
+///      32-byte ADRS + keccak256. Vectors from `script/signer.py c10-fips`; the
+///      JARDIN-layout variant is covered separately by legacy/test/SphincsC10Test.t.sol
+///      driven by `signer.py c10`. The two layouts must not be fed each other's
+///      vectors.
 contract SphincsC10Test is Test {
     SphincsC10Asm verifier;
 
@@ -55,8 +55,7 @@ contract SphincsC10Test is Test {
 
     /// @dev The layouts really are distinct: a JARDIN-layout C10 signature (same
     ///      params, same 4008-byte length, so it clears the length check) must not
-    ///      verify under the FIPS-layout verifier. This is the regression guard for
-    ///      the mistake that orphaned legacy/test/SphincsC11Test.t.sol.
+    ///      verify under the FIPS-layout verifier.
     function testC10RejectsJardinLayoutSignature() public {
         (bytes32 pkSeed, bytes32 pkRoot, bytes memory sig) = _sign("c10");
         assertEq(sig.length, 4008, "legacy C10 sig is also 4008 bytes");

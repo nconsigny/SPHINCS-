@@ -6,12 +6,10 @@ pragma solidity ^0.8.28;
 import "forge-std/Test.sol";
 import "../src/sha/SPHINCs-C10-SHA.sol";
 
-/// @dev End-to-end FFI test for the SHA-256 / 22-byte-ADRSc "minimal twin" of C10.
+/// @dev End-to-end FFI test for the SHA-256 / 22-byte-ADRSc twin of C10.
 ///      Vectors from `script/signer.py c10-sha` (hash=sha2, adrs_mode=adrsc,
 ///      parse=msb). Proves signer↔verifier byte agreement on the SHA-2 layout —
-///      the layout FIPS 205 §11.2 requires once you pick SHA-2, and the one
-///      EthereumPhone/PQ1's SPHINCsC10Asm does not use (it swaps only the hash and
-///      keeps the JARDIN 32-byte ADRS).
+///      the address form FIPS 205 §11.2 pairs with SHA-2.
 contract SphincsC10ShaTest is Test {
     SphincsC10ShaAsm verifier;
 

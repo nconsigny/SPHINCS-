@@ -6,7 +6,9 @@ name: CI
 #     C13-V-f4) — via cargo test, including the #[ignore]d full-height tests;
 #   - SLH-DSA-SHA2 FIPS-205-external conformance — via a pinned, reproducible KAT
 #     forge test and real-signature FFI round-trips (SLH-X-f1, SLH-X-f4/f5);
-#   - SLH-DSA-SHA2 Python↔C (FIPS reference) primitive parity — via crosscheck.py.
+#   - SLH-DSA-SHA2 Python↔C (FIPS reference) primitive parity — via crosscheck.py;
+#   - the frozen legacy/ verifiers, which live outside the default forge test path
+#     and so need an explicit job to be built and run at all.
 
 on:
   push:
@@ -83,3 +85,31 @@ jobs:
           OPTRAND=$(python3 -c "print('00'*16)")
           MSG=deadbeef00000000000000000000000000000000000000000000000000000000
           python3 signers/sphincsplus-128-24/crosscheck.py "$SEED" "$MSG" "$OPTRAND" --h 6 --a 8
+
+  # ── Frozen legacy/ verifiers. These sit OUTSIDE the default `forge test` path
+  #    (Foundry only scans test/), so they need an explicit job to be covered.
+  #    Builds BOTH C signers: the fast-signer wrappers refuse a binary older than
+  #    any .c/.h/Makefile beside it, so a missing or stale build fails here rather
+  #    than signing under a superseded scheme. Slow because the two SLH-DSA-Keccak
+  #    suites do real NIST-params signs.
+  legacy-verifiers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python signer deps
+        run: pip install eth-account eth-abi requests pycryptodome
+      - name: Build both SLH-DSA C reference signers (keccak one was never built in CI)
+        run: |
+          make -C signers/sphincsplus-128-24
+          make -C signers/jardin-keccak-128-24
+      - name: forge build
+        run: forge build
+      - name: forge test (legacy/ suites — C8/C10/C11/C12 + both SLH-DSA-Keccak)
+        env:
+          FOUNDRY_TEST: legacy/test
+        run: forge test -vv

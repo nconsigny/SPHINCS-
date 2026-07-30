@@ -3,29 +3,24 @@
 
 pragma solidity ^0.8.28;
 
-/// @title SphincsC10ShaAsm — SHA-256 "minimal twin" of the C10 verifier
+/// @title SphincsC10ShaAsm — SHA-256 twin of the C10 verifier
 /// @notice C10: W+C_F+C h=18 d=2 a=11 k=13 w=8 l=43 target_sum=205 sig=4008.
-/// @dev    SHA-256 + 22-byte compressed ADRSc twin of src/keccak/SPHINCs-C10Asm.sol
-///         (the keccak FIPS-uncompressed C10). The construction is IDENTICAL —
-///         same WOTS+C / FORS+C counter-grinding, same signature byte layout,
-///         same one-shot H_msg, same forced-zero FORS tree — only two things
-///         change, as a coupled unit:
+/// @dev    SHA-256 + 22-byte compressed ADRSc twin of src/keccak/SPHINCs-C10Asm.sol.
+///         The construction is identical — same WOTS+C / FORS+C counter-grinding,
+///         same signature byte layout, same one-shot H_msg, same forced-zero FORS
+///         tree. Hash and address change together, because FIPS 205 pairs each hash
+///         family with its own address form (§11.1 SHAKE with the uncompressed
+///         32-byte ADRS, §11.2 SHA-2 with ADRSc):
 ///           1. hash:   keccak256 opcode → SHA-256 precompile (0x02), every F/H/T
-///              framed as SHA-256(PK.seed‖toByte(0,48)‖ADRSc‖payload)[0..15];
+///              framed as SHA-256(PK.seed‖toByte(0,48)‖ADRSc‖payload)[0..15]. The
+///              pad makes PK.seed fill exactly one SHA-256 block, so that block's
+///              compression is constant for a given key.
 ///           2. address: FIPS uncompressed 32-byte ADRS → FIPS §11.2 compressed
 ///              22-byte ADRSc; and digest/digit parsing is MSB-first (FIPS base_2b
 ///              order) instead of the keccak family's LSB-first.
 ///
-///         Changing the hash WITHOUT changing the address is not a FIPS-shaped
-///         SHA-2 instantiation: §11.1 (SHAKE) uses the full 32-byte ADRS, §11.2
-///         (SHA-2) uses ADRSc plus the toByte(0,64-n) pad that makes PK.seed fill
-///         exactly one SHA-256 block. EthereumPhone/PQ1's SPHINCsC10Asm swaps only
-///         the hash and keeps the legacy JARDIN 32-byte ADRS with no pad, so it is
-///         a self-consistent scheme but not the FIPS SHA-2 layout; this file is.
-///
-///         Still NOT FIPS SLH-DSA: WOTS+C/FORS+C counter-grinding has no FIPS
-///         analog, and H_msg is one-shot (no MGF1, no context envelope). It is a
-///         research "SHA flavour" of C10. Vectors come from
+///         Not FIPS SLH-DSA: WOTS+C/FORS+C counter-grinding has no FIPS analog, and
+///         H_msg is one-shot (no MGF1, no context envelope). Vectors come from
 ///         script/signer.py c10-sha (cfg: hash=sha2, adrs_mode=adrsc, parse=msb).
 ///
 ///         Differs from C11-SHA only in h (18 vs 16): SUBTREE_H 9 vs 8, htIdx at

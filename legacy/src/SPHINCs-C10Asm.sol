@@ -10,14 +10,12 @@ pragma solidity ^0.8.28;
 ///
 ///      FORS is bound to the per-message hypertree leaf: `htIdx` occupies the
 ///      JARDIN `tree` field (bits 160..223) of every FORS_TREE / FORS_ROOTS
-///      address. Without it one FORS forest is shared by all 2^h hypertree
-///      positions, and since the WOTS/hypertree part of a signature only ever
-///      commits to the (message-independent) FORS public key, a single
-///      signature at a position plus FORS secrets harvested from signatures at
-///      *other* positions forges a second message at that position. Ported from
-///      EthereumPhone/PQ1 `SPHINCsC10Asm` (which fixed it downstream first);
-///      matches the field placement the live `src/keccak/` verifiers get from
-///      the FIPS 205 §4.2 split (tree=idxTree0, kp=idxLeaf0).
+///      address. The binding is load-bearing — without it one FORS forest serves
+///      all 2^h hypertree positions, and because the WOTS/hypertree part of a
+///      signature commits only to the message-independent FORS public key, FORS
+///      secrets revealed at one position would apply at every other. The live
+///      `src/keccak/` verifiers obtain the same property from the FIPS 205 §4.2
+///      field split (tree=idxTree0, kp=idxLeaf0); same fix as C6/C8.
 contract SphincsC10Asm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
@@ -40,11 +38,9 @@ contract SphincsC10Asm {
             }
 
             // Reject non-canonical public keys (low 128 bits must be zero) rather
-            // than trusting every caller to pre-validate. NOTE: PQ1's SPHINCsC10Asm
-            // returns `false` here to keep a "never reverts on key shape" contract
-            // for its try/catch wrappers; this repo reverts instead, matching C13 and
-            // every SHA-2 / BLAKE2b twin — and matching the malformed-input handling
-            // one check above, which already reverts on a bad sig length.
+            // than trusting every caller to pre-validate. Reverts, matching C13, the
+            // SHA-2 / BLAKE2b twins, and the sig-length check above: malformed inputs
+            // revert, soundness failures return false.
             if or(iszero(eq(pkSeed, and(pkSeed, N_MASK))), iszero(eq(pkRoot, and(pkRoot, N_MASK)))) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
                 mstore(0x04, 0x20)

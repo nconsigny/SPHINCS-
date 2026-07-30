@@ -7,12 +7,11 @@ pragma solidity ^0.8.28;
 /// @notice C10: W+C_F+C h=18 d=2 a=11 k=13 w=8 l=43 target_sum=205 sig=4008.
 ///         Sits between C11 (h=16, ~86 bit at a 2²⁰ cap) and C9 (h=20, ~112.6 bit):
 ///         ~104.5 bit at 2²⁰, ~609 K hashes to sign.
-/// @dev    Promoted out of `legacy/src/` and migrated from the JARDIN 32-byte ADRS to
-///         the FIPS 205 §4.2 uncompressed 32-byte ADRS + keccak256 (same layout as
-///         C7/C9/C11/C13). The signature byte layout and hash structure are unchanged
-///         from the legacy verifier; only the ADRS word positions move (JARDIN's
-///         8-byte tree → FIPS's 12-byte tree, and WOTS chain/hash from JARDIN
-///         ci(shl64)+cp(shl32) to FIPS word2(shl32)+word3(shl0)).
+/// @dev    FIPS 205 §4.2 uncompressed 32-byte ADRS + keccak256, the same layout as
+///         C7/C9/C11/C13. Signature byte layout and hash structure match the
+///         JARDIN-layout variant in `legacy/src/`; only the ADRS word positions
+///         differ there (8-byte tree vs 12-byte tree, and WOTS chain/hash in
+///         ci(shl64)+cp(shl32) rather than word2(shl32)+word3(shl0)).
 ///         FORS is keyed by the per-message hypertree leaf via the exact FIPS field
 ///         split — tree=idxTree0, kp=idxLeaf0, tree_index folds in the FORS tree number
 ///         ((forsTree<<(A-height))|node). Domain-separated H_msg (160 bytes).
@@ -22,9 +21,9 @@ pragma solidity ^0.8.28;
 ///         203, and one extra auth-path node per hypertree layer (sig 4008 vs 3976).
 ///         The FORS section is byte-identical in layout, so HT_START is 2336 for both.
 ///
-///         The JARDIN-layout original stays at `legacy/src/SPHINCs-C10Asm.sol` for
-///         benchmark reproducibility and because EthereumPhone/PQ1 tracks it; that one
-///         is driven by `script/signer.py c10`, this one by `c10-fips`. NOTE: this is
+///         The JARDIN-layout variant at `legacy/src/SPHINCs-C10Asm.sol` is kept for
+///         benchmark reproducibility; it is driven by `script/signer.py c10`, this one
+///         by `c10-fips`. NOTE: this is
 ///         the FIPS ADRS *layout*, not FIPS SLH-DSA — WOTS+C/FORS+C counter-grinding
 ///         has no FIPS analog, H_msg is one-shot, and digest parsing is LSB-first.
 contract SphincsC10Asm {

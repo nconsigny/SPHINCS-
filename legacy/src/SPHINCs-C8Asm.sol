@@ -9,12 +9,12 @@ pragma solidity ^0.8.28;
 ///
 ///      FORS is bound to the per-message hypertree leaf: `htIdx` occupies the
 ///      JARDIN `tree` field (bits 160..223) of every FORS_TREE / FORS_ROOTS
-///      address. Without it one FORS forest is shared by all 2^h positions, and
-///      since the WOTS/hypertree part of a signature only commits to the
-///      (message-independent) FORS public key, one signature at a position plus
-///      FORS secrets harvested from signatures at *other* positions forges a
-///      second message at that position. Same fix as C6/C10; the live
-///      `src/keccak/` verifiers get the equivalent from the FIPS 205 §4.2 split.
+///      address. The binding is load-bearing — without it one FORS forest serves
+///      all 2^h positions, and because the WOTS/hypertree part of a signature
+///      commits only to the message-independent FORS public key, FORS secrets
+///      revealed at one position would apply at every other. The live
+///      `src/keccak/` verifiers obtain the same property from the FIPS 205 §4.2
+///      field split; same fix as C6/C10.
 contract SphincsC8Asm {
 
     function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)

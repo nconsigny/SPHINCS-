@@ -35,18 +35,10 @@ def eprint(*a, **kw): print(*a, file=sys.stderr, **kw)
 def assert_binary_fresh(allow_stale=False):
     """Refuse to run a C binary older than the sources it was built from.
 
-    The binary is gitignored, so a working tree easily carries sources newer than
-    the last local `make`. That has bitten: ec5aae3 made this signer
-    hedged-by-default — reshaping its argv — and fixed FORS parsing to MSB-first,
-    but a binary built three weeks earlier stayed on disk. The wrapper passed
-    `--hedged`, the old argv layout read that flag as the seed, and every SLH-DSA
-    FFI test failed with "bad seed hex (need 48 bytes)" for six weeks. CI never
-    saw it, because CI runs `make` before `forge test`.
-
-    The crash was the lucky outcome. Parameters and CLI shape are compile-time
-    here, so a stale binary can just as easily sign under the *wrong scheme* with
-    no error at all — the same rebuild also picked up the FORS MSB-first change.
-    So fail closed rather than hand the mismatch to the binary.
+    The binary is gitignored, so a working tree can carry sources newer than the
+    last local `make`. Parameters and CLI shape are compile-time here, so a stale
+    binary may reject the wrapper's arguments or, worse, sign under a superseded
+    scheme with no error at all. Fail closed rather than hand it the mismatch.
     """
     src_dir = os.path.dirname(BIN_PATH)
     bin_mtime = os.path.getmtime(BIN_PATH)

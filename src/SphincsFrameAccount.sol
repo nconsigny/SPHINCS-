@@ -129,9 +129,7 @@ contract SphincsFrameAccount {
     /// @dev Self-call only. In a SENDER frame the account's own code runs with
     ///      `msg.sender == address(this)`, after the VERIFY frame has checked the
     ///      SPHINCS+ signature and APPROVEd — so authorization always comes from
-    ///      the PQ-verified frame, never from a bare external call. Before this
-    ///      guard `execute` had no caller check at all and any address could
-    ///      drain the account or make arbitrary calls as it.
+    ///      the PQ-verified frame, never from a bare external call.
     ///
     ///      `owner` is deliberately NOT accepted here. This account is pure-PQ:
     ///      admitting the ECDSA owner would mean a broken or leaked ECDSA key
