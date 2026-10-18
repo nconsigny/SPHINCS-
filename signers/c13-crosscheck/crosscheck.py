@@ -37,7 +37,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYSIG = REPO_ROOT / "script" / "signer.py"
 RSCLI = REPO_ROOT / "signers/signer-wasm" / "target" / "release" / "signer-c13"
-VERIFIER_SRC = "src/SPHINCs-C13Asm.sol:SphincsC13Asm"
+VERIFIER_SRC = "src/keccak/SPHINCs-C13Asm.sol:SphincsC13Asm"
 
 ANVIL_RPC = "http://127.0.0.1:8545"
 ANVIL_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
@@ -56,10 +56,18 @@ def require(cond, msg):
         sys.exit(1)
 
 
+def verifier_src_ok() -> bool:
+    """True if VERIFIER_SRC names an existing file that declares the contract."""
+    path, _, name = VERIFIER_SRC.partition(":")
+    src = REPO_ROOT / path
+    return src.is_file() and re.search(rf"\bcontract\s+{re.escape(name)}\b", src.read_text()) is not None
+
+
 def check_prereqs():
     for tool in ("anvil", "forge", "cast"):
         require(shutil.which(tool) is not None, f"`{tool}` not on PATH")
     require(PYSIG.exists(), f"Python signer missing: {PYSIG}")
+    require(verifier_src_ok(), f"verifier source missing: {VERIFIER_SRC}")
     require(RSCLI.exists(),
         f"Rust CLI missing at {RSCLI}\n"
         f"Build it: (cd signers/signer-wasm && cargo build --release --bin signer-c13)")

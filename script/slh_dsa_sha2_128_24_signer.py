@@ -498,6 +498,9 @@ def main():
     if len(msg_hex) % 2:
         msg_hex = "0" + msg_hex
     msg_raw = bytes.fromhex(msg_hex) if msg_hex else b""
+    if len(msg_raw) != 32:
+        eprint(f"  warning: signing a {len(msg_raw)}-byte message; the on-chain "
+               "verifier only takes bytes32, so this signature cannot verify there")
     # FIPS 205 EXTERNAL SLH-DSA.Sign with empty context: sign
     #   M' = toByte(0,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ M = 0x00 ‖ 0x00 ‖ M.
     # We sign the RAW message bytes (no rjust/truncate to 32 — that was the

@@ -28,7 +28,21 @@ const N = 16;
 /** NIST SP 800-230 SLH-DSA-SHA2-128-24 (custom set; see CLAUDE.md). */
 const slh = gen({ N: 16, W: 4, H: 22, D: 1, K: 6, A: 24, securityLevel: 128 }, SHA256_SIMPLE);
 
-const hexToBuf = (s) => Buffer.from(String(s).replace(/^0x/i, ''), 'hex');
+/**
+ * Parse a hex CLI argument the way the Python wrappers do: optional 0x prefix, an
+ * odd-length string is left-padded with '0', and any non-hex character is an error.
+ * Buffer.from(s, 'hex') alone silently drops a trailing odd nibble and stops at the
+ * first non-hex character, so the same input would sign different bytes here.
+ */
+function hexToBuf(name, s) {
+  let h = String(s).replace(/^0x/i, '');
+  if (!/^[0-9a-fA-F]*$/.test(h)) {
+    console.error(`${name} is not a hex string`);
+    process.exit(1);
+  }
+  if (h.length % 2) h = '0' + h;
+  return Buffer.from(h, 'hex');
+}
 const hmac512 = (key, msg) => createHmac('sha512', key).update(msg).digest();
 
 /** Mirrors derive_seed_48 in slh_dsa_sha2_128_24_fast_signer.py (JARDIN scheme). */
@@ -53,9 +67,13 @@ function main() {
     console.error('usage: slh_dsa_sha2_128_24_signer.mjs <master_sk_hex> <message_hex> [sig_counter]');
     process.exit(2);
   }
-  const masterSk = hexToBuf(mskHex);
+  const masterSk = hexToBuf('master_sk', mskHex);
   if (masterSk.length !== 32) { console.error('master_sk must be 32 bytes'); process.exit(1); }
-  const msg = hexToBuf(msgHex); // signed as-is; noble applies the 0x00 0x00 empty-ctx envelope
+  const msg = hexToBuf('message', msgHex); // signed as-is; noble applies the 0x00 0x00 empty-ctx envelope
+  if (msg.length !== 32) {
+    console.error('message must be exactly 32 bytes (the verifier takes bytes32)');
+    process.exit(1);
+  }
 
   const seed48 = deriveSeed48(masterSk);
   const { publicKey, secretKey } = slh.keygen(new Uint8Array(seed48));

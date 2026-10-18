@@ -102,6 +102,10 @@ def main():
 
     msg_hex = args.message_hex.removeprefix("0x")
     if len(msg_hex) % 2: msg_hex = "0" + msg_hex
+    # The on-chain verifier takes a bytes32 message; refuse anything else
+    # (same rule as slh_dsa_sha2_128_24_fast_signer.py).
+    if len(bytes.fromhex(msg_hex)) != 32:
+        eprint("message must be exactly 32 bytes (the verifier takes bytes32)"); sys.exit(1)
     # FIPS 205 external SLH-DSA.Sign, empty ctx: sign M' = 0x00 0x00 ‖ M. The GPU
     # binary is slh_sign_internal (raw bytes), so we prepend the envelope here to
     # match the on-chain verifier. (review SLH-X-f1)

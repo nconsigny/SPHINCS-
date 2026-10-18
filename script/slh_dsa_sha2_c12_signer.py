@@ -297,6 +297,9 @@ def main():
     mh = sys.argv[2].replace("0x", "")
     if len(mh) % 2: mh = "0" + mh
     msg_raw = bytes.fromhex(mh) if mh else b""
+    if len(msg_raw) != 32:
+        # The on-chain C12-SHA verifier takes a bytes32 message.
+        eprint("message must be exactly 32 bytes (the verifier takes bytes32)"); sys.exit(1)
     M = b"\x00\x00" + msg_raw   # FIPS external SLH-DSA, empty context
     sig_counter = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 

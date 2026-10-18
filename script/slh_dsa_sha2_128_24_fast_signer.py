@@ -135,6 +135,11 @@ def main():
 
     msg_hex = args.message_hex.removeprefix("0x")
     if len(msg_hex) % 2: msg_hex = "0" + msg_hex
+    # The on-chain verifier takes a bytes32 message. Refuse anything else, so a
+    # shortened hex string (e.g. hex(int) of a hash with a leading zero byte) is
+    # not silently signed as a 31-byte message the verifier would reject.
+    if len(bytes.fromhex(msg_hex)) != 32:
+        eprint("message must be exactly 32 bytes (the verifier takes bytes32)"); sys.exit(1)
     # FIPS 205 EXTERNAL SLH-DSA.Sign with empty context: the C binary is
     # slh_sign_internal (signs raw bytes), so we apply the envelope here by
     # prepending M' = toByte(0,1) ‖ toByte(0,1) ‖ M = 0x00 0x00 ‖ M. The
