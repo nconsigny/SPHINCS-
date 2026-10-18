@@ -64,6 +64,7 @@ signers/jardin-keccak-128-24/__pycache__/
 # Rust/WASM build artifacts
 signers/signer-wasm/target/
 signers/signer-wasm/pkg/
+signers/leansphincs23-keccak/target/
 verity/.lake/
 verity-framework/
 

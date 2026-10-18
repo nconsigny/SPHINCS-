@@ -74,6 +74,35 @@ The takeaway: **C13 is the cheapest verifier in the repo at 128-bit security up 
 
 C11 and C12 are light enough to run on a hardware wallet, 390s and 47.5s signature times on a ST33K1M5 secure element (Ledger nano S+). C12 has the lowest hardware signer cost of all (~37 K hashes - plain SPX with d=5 hypertree skips most tree-hash work) at the price of a 6,592-byte sig. SLH-DSA-SHA2-128-24 is the FIPS-aligned alternative: much larger signer cost even on a desktop-class signer that caches the XMSS tree (~200 M hashes / sig, dominated by FORS, which can't be cached because the leaf-index to FORS-tree-address mapping changes with every message), and ~1.07 B / sig on a zero-memory signer that has to rebuild the 2²²-leaf XMSS for every auth path. 128-bit security across the 2²⁴ usage window is carried by the FORS few-time layer absorbing the expected pseudorandom WOTS-leaf reuse over the 2²² leaf space (‡/§ above; [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md)), not by one-time WOTS use. The SHA-2 verifier implements **FIPS 205 *external* SLH-DSA.Verify with an empty context** (M wrapped as `0x00‖0x00‖M` before H_msg), so it matches published NIST/ACVP external KAT vectors. The Keccak twin trades bit-exact NIST compliance for ~34 % cheaper on-chain verification (but not a very interesting trade-off as it keeps the same signer cost).
 
+## leanSphincs-23 (keccak256)
+
+`src/keccak/LeanSphincs-23Asm.sol` verifies **leanSphincs-23**, the retuned set from the [sphincs-art](https://nconsigny.github.io/sphincs-art/) fork of Tom Wambsgans' leanSphincs ([note](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates/releases/download/doc-latest/leanSPHINCS.pdf), [code](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates/tree/main/crates/sphincs)), with **keccak256 in place of BLAKE2s**. That is the only change: tweaks, byte order, field splits and serialization are the upstream crate's, re-parameterized. The one thing upstream does not fix for these parameters, the message-digest field layout for `a = 12`, is pinned by the spec: [docs/leanSphincs-23-keccak.md](docs/leanSphincs-23-keccak.md).
+
+It is one XMSS tree (`h = 25`, `d = 1`) over FORS (`k = 13`, `a = 12`; no tree roots, the two top nodes of each tree feed the FORS key) and WOTS+C (64 chains of 4 positions, target sum `T = 128`), with `n = 16`. leanSphincs is not a SPHINCS+ ADRS scheme: it keeps its own 16-byte tweak (`LE32(lo) ‖ LE24(hi) ‖ t|step<<5 ‖ 0^8`), so `P ‖ tweak` is exactly one EVM word. Verification is a constant **249 keccak256 calls**. The interface is the C-series `verify(pkSeed, pkRoot, message, sig)` (keys high-aligned: `P ‖ 0^16`, `root ‖ 0^16`), so `SphincsAccount` takes it unchanged.
+
+| | **leanSphincs-23 (keccak)** | C13 | SLH-DSA-SHA2-128-24 |
+|---|---|---|---|
+| h / d | 25 / 1 | 22 / 2 | 22 / 1 |
+| Few-time layer | FORS, k=13, a=12 | FORS+C, k=7, a=19 | FORS, k=6, a=24 |
+| One-time layer | WOTS+C, w=4, 64 chains, T=128 | WOTS+C, w=8, 43 chains | WOTS+, w=4, 68 chains |
+| Sig | 4,148 B | 3,688 B | 3,856 B |
+| Verify gas | **~39 K** | 105 K | ~142 K |
+| Lifetime | 2²³ full key / 2²¹ standard / 20 K light | 2²² cap | 2²⁴ usage cap |
+
+- **Verify gas** for leanSphincs-23 is the `verify` call frame (`vm.lastCallGas`, the same as Forge's trace): 38,879–39,002 over the six KAT vectors, 38,845 for a fresh Rust signature. The keccak count is fixed, but the gas depends on the WOTS chain step counts and on nothing else: typical signatures differ by a few hundred, and any admissible signature lies in 38,366–39,395. The tests gate the frame figure at 39,600, on the KATs and on random-digest signatures. A `gasleft()` delta around the external call is 40.3–40.5 K: it adds the call's account access and the caller's ABI encoding of the 4,148-byte argument, so it depends on the caller (and is 2.5 K higher again under `forge test --isolate`, where the verifier is cold on every call). `SphincsAccount.validateUserOp` (ECDSA + leanSphincs-23) is 53.9–54.0 K. C13 and SLH-DSA are the pure-assembly figures from the Variants table.
+- **Lifetime** figures are sphincs-art's one-signer estimates for leanSphincs-23 (not proved in Lean): **8.4 M ≈ 2²³** signatures for a full `2^25` key, **2.1 M ≈ 2²¹** for the "standard" `2^20` subtree, **20 K** for the "light" (Ledger Nano S+) `2^13` subtree.
+- **Keygen.** Keys are pruned: the signer builds a subtree of `2^b` leaves, and the tree levels above it are surrogate siblings derived from the seed. The verifier cannot tell a pruned key from a full one, so lifetime is bought with keygen time: `≈ 2^b · 226` keccak calls, i.e. 1.85 M (`b = 13`), 237 M (`b = 20`), 7.6·10⁹ (full key).
+- **Signing** costs about 148 K keccak calls plus `2^(25−b)` randomizer tries: 133 K to rebuild the 13 FORS trees of the signed instance, about 14.7 K WOTS+C counter tries, and a ρ grind until the digest's leaf lands in the kept subtree. Measured on the Rust signer: 152.5 K per signature at `b = 13`.
+
+```bash
+cd signers/leansphincs23-keccak && cargo build --release && cargo test --release
+./target/release/ls23k sign <seed_hex64> <b> <msg_hex64>   # 0x ‖ abi.encode(pkSeed, pkRoot, sig); b = kept subtree height
+cd ../.. && python3 signers/leansphincs23-keccak/crosscheck.py --jobs 4   # Rust ↔ Python, byte for byte
+forge test --match-contract LeanSphincs23Test -vv   # verifier + SphincsAccount suites (KATs, tampering, spec model, random digests, FFI)
+```
+
+The Rust signer (`signers/leansphincs23-keccak`) is a port of the upstream crate. `script/leansphincs23_signer.py` is an independent Python signer written from the spec, and the crosscheck holds the two to byte equality. The Forge KAT fixture `test/fixtures/leansphincs23-keccak-kat.json` is regenerated by `signers/leansphincs23-keccak/make_kat_fixture.py`, and CI job `leansphincs23` runs all of the above.
+
 ## Stateless SPHINCs- Architecture
 
 ### Shared hash kernel
@@ -88,6 +117,8 @@ Live verifiers in `src/` are organized **one folder per hash function**: `src/ke
 | **FIPS uncompressed 32 B** (`src/blake/`) | C11-BLAKE, C13-BLAKE, C12-BLAKE | `layer4 ‖ tree12 ‖ type4 ‖ word1·4 ‖ word2·4 ‖ word3·4` | BLAKE2b (precompile 0x09, F-only) | `seed32 ‖ adrs32 ‖ payload` |
 | **FIPS ADRSc 22 B** (`src/sha/`) | C11-SHA, C13-SHA, C12-SHA, SLH-DSA-SHA2-128-24 | `layer1 ‖ tree8 ‖ type1 ‖ 12 B type-dependent` | SHA-256 (precompile 0x02) | `PK.seed(16) ‖ zeros(48) ‖ ADRSc(22) ‖ payload` |
 | _JARDIN 32 B (retired → `legacy/`)_ | SLH-DSA-Keccak-128-24; legacy C11/C12 originals | `layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
+
+leanSphincs-23 (`src/keccak/LeanSphincs-23Asm.sol`) is not in this table: it is not a SPHINCS+ ADRS scheme, and it keeps leanSphincs's own 16-byte tweak with input `P(16) ‖ tweak(16) ‖ payload` (see [leanSphincs-23](#leansphincs-23-keccak256)).
 
 ### SHA-256 twins (`src/sha/`)
 
@@ -189,6 +220,8 @@ SPHINCs- and ECDSA are derived through independent paths - compromising one does
 | `script/slh_dsa_keccak_128_24_signer.py` | Python (slow; ~hours at NIST params) | SLH-DSA-Keccak-128-24 | No |
 | `signers/sphincsplus-128-24/` | C (forked from sphincs/sphincsplus ref) | SLH-DSA-SHA2-128-24 | No, seeds fed in |
 | `signers/jardin-keccak-128-24/` | C (sphincsplus fork + custom keccak + 32-B ADRS) | SLH-DSA-Keccak-128-24 | No |
+| `signers/leansphincs23-keccak/` (`ls23k`) | Rust (port of the upstream leanSphincs crate) | leanSphincs-23 (keccak) | No, seed fed in |
+| `script/leansphincs23_signer.py` | Python (independent, from the spec; `b ≈ 6..12`) | leanSphincs-23 (keccak) | No |
 
 ```bash
 # Rust WASM C-series signer
@@ -298,6 +331,7 @@ forge test --match-contract SLH_DSA_Keccak_128_24_Test -vv
 
 ```bash
 forge test
+(cd signers/leansphincs23-keccak && cargo test --release)
 cd signers/signer-wasm && cargo test --release -- --ignored
 ```
 
