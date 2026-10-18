@@ -9,8 +9,12 @@ and swap its ADRS constructor for the FIPS one. Python resolves these values and
 `make_adrs` as module globals at call time, so every call site (WOTS, XMSS,
 FORS, and the signer's own self-check verifier) picks up the C12 layout.
 
-The shared `jardin_spx_signer.py` is intentionally left untouched because it is
-cross-referenced verbatim by the nconsigny/JARDIN repo (as JardinSpxVerifier).
+The shared `jardin_spx_signer.py` is cross-referenced by the nconsigny/JARDIN
+repo (as JardinSpxVerifier), so this wrapper only overrides parameters and the
+ADRS constructor. Its FORS PRF binds each leaf secret to the hypertree position
+(ht_tree, ht_leaf); keys that signed with the older position-free FORS PRF have
+exposed reusable secrets and must be rotated, and the JARDIN copy needs the same
+PRF fix.
 
 Usage:
     python3 script/spx_fips_signer.py <master_sk_hex> <message_hex> [sig_counter]

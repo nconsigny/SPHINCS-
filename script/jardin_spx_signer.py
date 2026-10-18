@@ -144,8 +144,23 @@ def wots_secret(sk_seed, layer, tree, kp, chain_idx):
            to_b4(kp) + to_b4(chain_idx)
     return keccak256(data) & N_MASK
 
-def fors_secret(sk_seed, tree_idx, leaf_idx):
-    data = to_b32(sk_seed) + b"spx_fors" + to_b4(tree_idx) + to_b4(leaf_idx)
+def fors_secret(sk_seed, ht_tree, ht_leaf, fors_t, j):
+    """FORS leaf secret for leaf j of FORS tree fors_t of the FORS instance at
+    hypertree position (ht_tree, ht_leaf).
+
+    The position MUST be in the PRF input. Every one of the 2^h FORS instances
+    under a key needs its own secrets; if the PRF only takes (fors_t, j), all
+    instances share one table of K * 2^A secrets. The verifier binds the FORS
+    ADRS to the position, but that does not help: a leaf is F(pkSeed, ADRS, sk)
+    and pkSeed / ADRS are public, so a secret revealed at one position rebuilds
+    the matching leaf at every other position. About 1,000 honest signatures
+    then fill the whole table and allow a universal forgery (grind R until
+    H_msg lands on a position that already has an honest hypertree signature).
+    This matches script/signer.py (ht_idx folded in) and the FIPS 205 PRF over
+    ADRS(FORS_PRF, tree, kp, ...) used by slh_dsa_sha2_c12_signer.py.
+    """
+    data = (to_b32(sk_seed) + b"spx_fors" + ht_tree.to_bytes(8, "big") +
+            to_b4(ht_leaf) + to_b4(fors_t) + to_b4(j))
     return keccak256(data) & N_MASK
 
 def derive_R(sk_prf, message, sig_counter):
@@ -225,7 +240,7 @@ def build_fors_subtree(seed, sk_seed, fors_t, ht_tree, ht_leaf):
     n_leaves = 1 << A
     leaves = []
     for j in range(n_leaves):
-        sk = fors_secret(sk_seed, fors_t, j)
+        sk = fors_secret(sk_seed, ht_tree, ht_leaf, fors_t, j)
         adrs = make_adrs(0, ht_tree, ADRS_FORS_TREE, ht_leaf, 0, 0, (fors_t << A) | j)
         leaves.append(F(seed, adrs, sk))
     nodes = [leaves]
@@ -261,7 +276,7 @@ def spx_sign(pk_seed, sk_seed, sk_prf, pk_root, message: int, sig_counter: int =
     roots = []
     for t in range(K):
         nodes, root = build_fors_subtree(pk_seed, sk_seed, t, tree_idx, leaf_idx)
-        sk = fors_secret(sk_seed, t, md[t])
+        sk = fors_secret(sk_seed, tree_idx, leaf_idx, t, md[t])
         idx = md[t]
         path = []
         for h in range(A):

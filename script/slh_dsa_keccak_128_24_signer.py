@@ -138,9 +138,16 @@ def wots_secret(sk_seed, layer, tree, kp, chain_idx):
             tree.to_bytes(8, "big") + to_b4(kp) + to_b4(chain_idx))
     return keccak256(data) & N_MASK
 
-def fors_secret(sk_seed, fors_t, leaf_idx_within_tree):
-    data = (to_b32(sk_seed) + b"slhk_fors" + to_b4(fors_t) +
-            to_b4(leaf_idx_within_tree))
+def fors_secret(sk_seed, ht_tree, ht_leaf, fors_t, leaf_idx_within_tree):
+    """FORS leaf secret, bound to the hypertree position (ht_tree, ht_leaf).
+
+    Without the position every FORS instance under the key would share one
+    secret table, and secrets revealed at one leaf would rebuild FORS trees at
+    any other leaf (see jardin_spx_signer.fors_secret). The C fork in
+    signers/jardin-keccak-128-24 already binds kp through its PRF ADRS.
+    """
+    data = (to_b32(sk_seed) + b"slhk_fors" + ht_tree.to_bytes(8, "big") +
+            to_b4(ht_leaf) + to_b4(fors_t) + to_b4(leaf_idx_within_tree))
     return keccak256(data) & N_MASK
 
 def derive_R(sk_prf, message, sig_counter):
@@ -257,7 +264,7 @@ def build_fors_subtree(seed, sk_seed, fors_t, ht_tree, ht_leaf, leaf_to_open,
     stack = []   # entries: (height, node)
 
     for j in range(n_leaves):
-        sk = fors_secret(sk_seed, fors_t, j)
+        sk = fors_secret(sk_seed, ht_tree, ht_leaf, fors_t, j)
         if j == leaf_to_open:
             sk_at_leaf = sk
         adrs = make_adrs(0, ht_tree, ADRS_FORS_TREE, ht_leaf, 0, 0,

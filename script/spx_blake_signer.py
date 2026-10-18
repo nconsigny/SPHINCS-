@@ -13,6 +13,8 @@ time):
 The PRFs (`wots_secret`, `fors_secret`, `derive_R`) keep keccak — they are
 signer-only (the verifier reads their outputs from the signature, never
 recomputes them), so the on-chain BLAKE2b verifier is unaffected by them.
+`fors_secret` binds every FORS leaf secret to the hypertree position
+(ht_tree, ht_leaf); see the note in jardin_spx_signer.fors_secret.
 
 On-chain these run on the BLAKE2F compression precompile (0x09); here
 hashlib.blake2b is BLAKE2b directly. F/H/T use a 16-byte digest (top-aligned,
