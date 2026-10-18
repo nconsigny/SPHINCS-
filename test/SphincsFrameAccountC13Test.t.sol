@@ -122,11 +122,13 @@ contract SphincsFrameAccountC13Test is Test {
     // ── EIP-8141-conformant verify frame ───────────────────────────────────
     //
     // `verifyFrameAndApprove` reads the digest from TXPARAM(0x08), the witness from
-    // an ARBITRARY tx.signatures entry via SIGPARAM, and the scope from
-    // FRAMEPARAM(0x06). Those opcodes (0xb0 / 0xb4 / 0xb3) and APPROVE (0xaa) do not
-    // exist on a pre-8141 EVM, so the path CANNOT be executed here — conformance is
-    // asserted by inspecting the module's bytecode, and by pinning that the caller
-    // gate fires before any undefined opcode is reached.
+    // an ARBITRARY tx.signatures entry via SIGPARAM / SIGDATACOPY, and the scope from
+    // FRAMEPARAM(0x06). Those opcodes (0xb0 / 0xb4 / 0xb5 / 0xb3) and APPROVE (0xaa)
+    // do not exist on a pre-8141 EVM, so the path CANNOT be executed here —
+    // conformance is asserted by inspecting the module's bytecode, and by pinning
+    // that the caller gate fires before any undefined opcode is reached. The module
+    // is run end to end under the current spec text by the EIP-8141 emulator in
+    // test/SphincsFrameModuleEmuTest.t.sol.
 
     function test_FrameModule_EmitsTheSpecifiedInstructions() public view {
         bytes memory code = frameModule.code;
@@ -147,9 +149,14 @@ contract SphincsFrameAccountC13Test is Test {
         // FRAMEPARAM(0x06) = allowed_scope.
         assertTrue(_contains(code, hex"600690b3"), "FRAMEPARAM(0x06) allowed scope");
 
-        // SIGPARAM(0x04) copy: DUP1, len fetch, then the five-item stack setup
-        // ending with signatureIndex on top. 0x00a4 must equal the module's ARGS_SIG.
-        assertTrue(_contains(code, hex"80600390b46100a49160009190600490b4"), "SIGPARAM(0x04) copy");
+        // Witness copy: DUP1, len fetch, then SIGDATACOPY (0xb5) with memOffset 0x00a4
+        // (= the module's ARGS_SIG) on top, dataOffset 0, length, signatureIndex. The
+        // SIGPARAM(0x04) copy form of the 2026-07-28 draft was removed from the spec
+        // (any undefined SIGPARAM param halts), so it must not come back.
+        // (review frame-sigparam-copy-removed)
+        assertTrue(_contains(code, hex"80600390b460006100a4b5"), "SIGDATACOPY witness copy");
+        assertFalse(_contains(code, hex"600490b4"), "no SIGPARAM(0x04)");
+        assertFalse(_contains(code, hex"80600390b46100a49160009190600490b4"), "no 07-28 SIGPARAM copy form");
 
         // APPROVE(offset=0, length=0, scope).
         assertTrue(_contains(code, hex"60006000aa"), "APPROVE");
@@ -184,6 +191,44 @@ contract SphincsFrameAccountC13Test is Test {
         frame.verifyFrameAndApprove();
     }
 
+    /// @dev The module takes pkSeed / pkRoot / verifier from its DELEGATECALL
+    ///      input. A VERIFY frame aimed at the module itself must not be able to
+    ///      feed it an attacker's keys and verifier and so APPROVE for the module.
+    ///      The guard runs before any EIP-8141 opcode, so on today's EVM it shows
+    ///      up as a clean Error revert, not an undefined-opcode halt.
+    function test_FrameModule_RejectsDirectCall() public {
+        bytes memory attackerInput = abi.encode(bytes32(uint256(1) << 128), bytes32(uint256(2) << 128), address(verifier));
+        vm.prank(address(0xaa));
+        (bool ok, bytes memory ret) = frameModule.call(attackerInput);
+        assertFalse(ok, "direct call must fail");
+        assertEq(ret, abi.encodeWithSignature("Error(string)", "delegatecall only"), "guard reason");
+    }
+
+    /// @dev Delegatecalled through the account, the guard passes and execution
+    ///      goes on to the first EIP-8141 opcode. That opcode halts exceptionally
+    ///      with no return data, so the guard's Error must NOT appear here.
+    function test_FrameModule_GuardPassesUnderDelegatecall() public {
+        SphincsFrameAccount frame = _canonicalFrame();
+        vm.prank(address(0xaa));
+        (bool ok, bytes memory ret) = address(frame).call(abi.encodeWithSignature("verifyFrameAndApprove()"));
+        assertFalse(ok, "pre-8141 EVM halts");
+        assertEq(ret.length, 0, "halted on an undefined opcode, not on the guard");
+    }
+
+    /// @dev The verify path is storage-free. A frame transaction starts with
+    ///      accessed_storage_keys empty, so every SLOAD would be a cold
+    ///      2,100-gas read. The keys are account immutables forwarded as the
+    ///      DELEGATECALL input instead.
+    function test_FrameModule_HasNoStorageOpcodes() public view {
+        bytes memory code = frameModule.code;
+        for (uint256 i = 0; i < code.length; i++) {
+            uint8 op = uint8(code[i]);
+            assertTrue(op != 0x54, "module must not SLOAD");
+            assertTrue(op != 0x55, "module must not SSTORE");
+            if (op >= 0x60 && op <= 0x7f) i += op - 0x5f; // skip PUSHn immediates
+        }
+    }
+
     function test_VerifyFrameAndApprove_RevertsWithoutModule() public {
         SphincsFrameAccount frame = new SphincsFrameAccount(
             bytes32(uint256(1) << 128), bytes32(uint256(2) << 128), address(verifier), frameOwner, address(0)
@@ -205,14 +250,76 @@ contract SphincsFrameAccountC13Test is Test {
         return false;
     }
 
+    // ── constructor guards (review frame-ctor-unchecked-module) ─────────────
+    //
+    // Nothing the constructor stores can be rotated later, so a value that can never
+    // verify would brick the account and lock its ETH. These are refused up front.
+
     function testFrameRevertsOnNonCanonicalKey() public {
-        // Non-canonical pkSeed (low 128 bits set) now trips the verifier's
-        // "Invalid public key" guard, surfaced by the frame as "verify call failed".
-        bytes32 pkSeed = bytes32(uint256(1));
-        bytes32 pkRoot = bytes32(uint256(2) << 128);
-        SphincsFrameAccount frame = _newFrame(pkSeed, pkRoot);
-        bytes memory zeroSig = new bytes(3688);
-        vm.expectRevert(bytes("verify call failed"));
-        frame.verifyAndApprove(bytes32(uint256(0xdead)), zeroSig, 1);
+        // Low 128 bits set: every verifier rejects such a key ("Invalid public key").
+        vm.expectRevert(SphincsFrameAccount.NonCanonicalKey.selector);
+        _newFrame(bytes32(uint256(1)), bytes32(uint256(2) << 128));
+        vm.expectRevert(SphincsFrameAccount.NonCanonicalKey.selector);
+        _newFrame(bytes32(uint256(1) << 128), bytes32((uint256(2) << 128) | 1));
+    }
+
+    function testFrameRejectsCodelessVerifier() public {
+        vm.expectRevert(SphincsFrameAccount.VerifierHasNoCode.selector);
+        new SphincsFrameAccount(bytes32(uint256(1) << 128), bytes32(uint256(2) << 128), makeAddr("eoa"), frameOwner, frameModule);
+    }
+
+    function testFrameRejectsCodelessModule() public {
+        // A DELEGATECALL into a code-less address "succeeds" without running APPROVE,
+        // so every frame transaction would be invalid.
+        vm.expectRevert(SphincsFrameAccount.FrameModuleHasNoCode.selector);
+        new SphincsFrameAccount(bytes32(uint256(1) << 128), bytes32(uint256(2) << 128), address(verifier), frameOwner, makeAddr("eoa"));
+    }
+
+    function testFrameAcceptsFullTopHalfKey() public {
+        bytes32 top = bytes32(~uint256(type(uint128).max));
+        SphincsFrameAccount frame = _newFrame(top, top);
+        assertEq(frame.pkSeed(), top);
+        assertEq(frame.pkRoot(), top);
+    }
+
+    /// @dev Both entry points forward exactly `pkSeed ‖ pkRoot ‖ verifier [‖ sigIndex]`
+    ///      to the module. A recorder module bounces its calldata back as revert data.
+    function test_VerifyFrameAndApprove_ForwardsKeysAndIndex() public {
+        address recorder = address(new CalldataRecorder());
+        bytes32 seed = bytes32(uint256(1) << 128);
+        bytes32 root = bytes32(uint256(2) << 128);
+        SphincsFrameAccount frame = new SphincsFrameAccount(seed, root, address(verifier), frameOwner, recorder);
+
+        vm.prank(address(0xaa));
+        (bool ok, bytes memory ret) = address(frame).call(abi.encodeWithSignature("verifyFrameAndApprove()"));
+        assertFalse(ok);
+        assertEq(ret, abi.encode(seed, root, address(verifier)), "no-index payload");
+
+        vm.prank(address(0xaa));
+        (ok, ret) = address(frame).call(abi.encodeWithSignature("verifyFrameAndApprove(uint256)", uint256(7)));
+        assertFalse(ok);
+        assertEq(ret, abi.encode(seed, root, address(verifier), uint256(7)), "indexed payload");
+    }
+
+    function test_VerifyFrameAndApproveIndexed_RejectsNonEntryPointCaller() public {
+        SphincsFrameAccount frame = _canonicalFrame();
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert(SphincsFrameAccount.NotEntryPoint.selector);
+        frame.verifyFrameAndApprove(1);
+    }
+
+    function test_Account_GasImmediatelyBeforeDelegatecall() public {
+        assertTrue(_contains(address(_canonicalFrame()).code, hex"5af4"), "GAS immediately followed by DELEGATECALL");
+    }
+}
+
+/// @dev Test helper: reverts with its own calldata, so a delegatecaller sees exactly what
+///      it sent.
+contract CalldataRecorder {
+    fallback() external {
+        assembly {
+            calldatacopy(0, 0, calldatasize())
+            revert(0, calldatasize())
+        }
     }
 }

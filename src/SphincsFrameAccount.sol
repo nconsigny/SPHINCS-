@@ -11,19 +11,23 @@ pragma solidity ^0.8.28;
 ///      This contract is compiled normally; the APPROVE call is done via a raw CALL to
 ///      a precompile-like address or inline assembly with the custom opcode.
 contract SphincsFrameAccount {
-    bytes32 public pkSeed;   // slot 0
-    bytes32 public pkRoot;   // slot 1
-    address public verifier; // slot 2 — SphincsC6Asm address
-    address public owner;    // slot 3 — bookkeeping only; see `execute`
+    /// @dev The public key and verifier are immutables, so they live in code as
+    ///      PUSH32 and are never in storage. In a frame transaction
+    ///      accessed_storage_keys starts empty, so storage keys would cost three
+    ///      cold SLOADs (3 x 2100 gas) on every verify. They also keep the verify
+    ///      path free of storage reads.
+    bytes32 public immutable pkSeed;
+    bytes32 public immutable pkRoot;
+    address public immutable verifier; // shared SPHINCs- verifier
+    address public owner;    // slot 0 — bookkeeping only; see `execute`
 
     /// @notice EIP-8141 `ENTRY_POINT` — the `caller` of every VERIFY / DEFAULT frame.
     address internal constant ENTRY_POINT = address(0xaa);
 
     /// @notice `src/SphincsFrameVerify.yul`, DELEGATECALLed by `verifyFrameAndApprove`.
-    /// @dev Immutable (code, not storage) so slots 0..3 keep the layout that
-    ///      `script/send_frame_tx_c13.py` reads. A malicious module would own the
-    ///      account outright via DELEGATECALL, so it is fixed at deploy time and
-    ///      never taken from calldata or rotatable.
+    /// @dev A malicious module would own the account outright via DELEGATECALL,
+    ///      so it is fixed at deploy time and is never taken from calldata or
+    ///      rotated.
     address public immutable frameModule;
 
     /// @notice `execute` was called by anything other than the account itself.
@@ -32,8 +36,27 @@ contract SphincsFrameAccount {
     error NotEntryPoint();
     /// @notice No EIP-8141 verify module was configured at deploy time.
     error NoFrameModule();
+    /// @notice pkSeed or pkRoot has low-128 bits set; every verifier rejects such a key.
+    error NonCanonicalKey();
+    /// @notice The verifier address has no code.
+    error VerifierHasNoCode();
+    /// @notice A non-zero frame module address has no code.
+    error FrameModuleHasNoCode();
+
+    /// @dev Low half of a 32-byte word. n=16 keys are top-aligned, so these bits must
+    ///      be zero. A constant, so it takes no storage slot.
+    bytes32 private constant N_MASK_LOW = bytes32(uint256(type(uint128).max));
 
     constructor(bytes32 _seed, bytes32 _root, address _verifier, address _owner, address _frameModule) {
+        // Nothing here can be changed later (no key, verifier or module rotation), and
+        // `execute` only runs after an approved VERIFY frame. A key the verifiers reject,
+        // a code-less verifier or a code-less module would therefore brick the account
+        // and lock any ETH it receives, so refuse them at deploy time.
+        // `_frameModule == address(0)` stays allowed for the legacy `verifyAndApprove`
+        // configuration. (review frame-ctor-unchecked-module)
+        require((_seed & N_MASK_LOW) == 0 && (_root & N_MASK_LOW) == 0, NonCanonicalKey());
+        require(_verifier.code.length != 0, VerifierHasNoCode());
+        require(_frameModule == address(0) || _frameModule.code.length != 0, FrameModuleHasNoCode());
         pkSeed = _seed;
         pkRoot = _root;
         verifier = _verifier;
@@ -41,36 +64,71 @@ contract SphincsFrameAccount {
         frameModule = _frameModule;
     }
 
-    /// @notice EIP-8141-conformant VERIFY-frame entry point. Takes no arguments:
-    ///         the digest comes from `TXPARAM(0x08)` (`compute_sig_hash(tx)`), the
-    ///         witness from an `ARBITRARY` entry of `tx.signatures` via `SIGPARAM`,
-    ///         and the approval scope from `FRAMEPARAM(0x06)` — so nothing in frame
-    ///         calldata is trusted. This is the function a frame-enabled chain
-    ///         should target; `verifyAndApprove` below is the pre-`signatures`
-    ///         demo path and is NOT replay-safe.
-    /// @dev Logic lives in `src/SphincsFrameVerify.yul` because TXPARAM (0xb0),
-    ///      FRAMEPARAM (0xb3), SIGPARAM (0xb4) and APPROVE (0xaa) are unknown to
-    ///      solc and only reachable via Yul `verbatim`, which Solidity inline
-    ///      assembly does not expose. DELEGATECALL keeps `ADDRESS` equal to this
-    ///      account, which `APPROVE` requires, and keeps the module's `SLOAD`s on
-    ///      this account's slots — both explicitly permitted during a validation
-    ///      prefix. On success the module ends in `APPROVE`, which exits the
-    ///      delegatecall frame successfully; the approval is transaction-scoped
-    ///      and survives the return.
+    /// @notice EIP-8141-conformant VERIFY-frame entry point: verifies the FIRST
+    ///         `ARBITRARY` entry of `tx.signatures` with an empty `msg`. Use the
+    ///         `verifyFrameAndApprove(uint256)` overload when this account's witness
+    ///         is not that entry, e.g. a sponsored transaction whose sender and
+    ///         sponsor are both SphincsFrameAccounts.
+    /// @dev The digest comes from `TXPARAM(0x08)` (`compute_sig_hash(tx)`), the
+    ///      witness bytes from `SIGDATACOPY`, and the approval scope from
+    ///      `FRAMEPARAM(0x06)`. This is the function a frame-enabled chain should
+    ///      target; `verifyAndApprove` below is the pre-`signatures` demo path and
+    ///      is NOT replay-safe.
     ///
-    ///      Reverts on any pre-8141 EVM: the four instructions above are
+    ///      Logic lives in `src/SphincsFrameVerify.yul` because TXPARAM (0xb0),
+    ///      FRAMEPARAM (0xb3), SIGPARAM (0xb4), SIGDATACOPY (0xb5) and APPROVE
+    ///      (0xaa) are unknown to solc and only reachable via Yul `verbatim`, which
+    ///      Solidity inline assembly does not expose. DELEGATECALL keeps `ADDRESS`
+    ///      equal to this account, which `APPROVE` requires. The module reads no
+    ///      storage. Its only input is the DELEGATECALL payload built below from
+    ///      this account's immutables, `pkSeed ‖ pkRoot ‖ verifier` (0x60 bytes),
+    ///      plus `sigIndex` for the overload (0x80 bytes). The module refuses to
+    ///      run unless it is delegatecalled. On success the module ends in
+    ///      `APPROVE`, which exits the delegatecall frame successfully. The
+    ///      approval is transaction-scoped and survives the return.
+    ///
+    ///      Reverts on any pre-8141 EVM: the five instructions above are
     ///      undefined opcodes there.
     function verifyFrameAndApprove() external {
+        _verifyFrame(0, 0);
+    }
+
+    /// @notice As `verifyFrameAndApprove()`, but verifies `tx.signatures[sigIndex]`,
+    ///         which must be an `ARBITRARY` entry with an empty `msg`.
+    /// @dev The index comes from this frame's data, which `compute_sig_hash(tx)`
+    ///      covers, so the witness commits to it. It only selects which entry's
+    ///      bytes are checked against this account's key; a wrong index fails
+    ///      verification. (review frame-first-arbitrary-entry)
+    function verifyFrameAndApprove(uint256 sigIndex) external {
+        _verifyFrame(0x20, sigIndex);
+    }
+
+    /// @param extra 0 (first-match) or 0x20 (append `sigIndex` to the module input).
+    function _verifyFrame(uint256 extra, uint256 sigIndex) private {
         // VERIFY and DEFAULT frames both have `caller == ENTRY_POINT`; a SENDER
         // frame would have `caller == tx.sender`. Refusing anything else keeps this
         // inert outside a frame transaction (where APPROVE halts exceptionally).
         require(msg.sender == ENTRY_POINT, NotEntryPoint());
-        require(frameModule != address(0), NoFrameModule());
+        address module = frameModule;
+        require(module != address(0), NoFrameModule());
 
-        (bool ok, bytes memory ret) = frameModule.delegatecall("");
-        if (!ok) {
-            assembly ("memory-safe") {
-                revert(add(ret, 0x20), mload(ret))
+        bytes32 seed = pkSeed;
+        bytes32 root = pkRoot;
+        address v = verifier;
+        assembly ("memory-safe") {
+            // Scratch space above the free-memory pointer. Nothing is allocated,
+            // and the function returns or reverts right after.
+            let p := mload(0x40)
+            mstore(p, seed)
+            mstore(add(p, 0x20), root)
+            mstore(add(p, 0x40), v)
+            mstore(add(p, 0x60), sigIndex)
+            let len := add(0x60, extra)
+            // `gas()` is evaluated last, so GAS sits immediately before
+            // DELEGATECALL, the form the validation-prefix opcode rules allow.
+            if iszero(delegatecall(gas(), module, p, len, 0, 0)) {
+                returndatacopy(p, 0, returndatasize())
+                revert(p, returndatasize())
             }
         }
     }
@@ -102,8 +160,8 @@ contract SphincsFrameAccount {
                 sig
             )
         );
-        // Error-surface contract (review C13-evm-f2): the C13 verifier RETURNS
-        // `false` for every soundness rejection — invalid Merkle root, FORS+C
+        // Error-surface contract (review C13-evm-f2 / L-01): every live verifier
+        // RETURNS `false` for every soundness rejection — invalid Merkle root, FORS+C
         // forced-zero violation, and WOTS+C target-sum violation — so those all
         // land on the descriptive "invalid SPHINCS+ signature" path below. The
         // verifier only REVERTS on malformed *inputs* (wrong sig length /

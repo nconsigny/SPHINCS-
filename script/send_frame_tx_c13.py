@@ -137,7 +137,10 @@ def main():
     print(f"Re-derived pkRoot: {pk_root_hex}")
 
     # Sanity: this must match the keys that were embedded in the frame_account's
-    # storage at deploy time. The frame_account stores pkSeed at slot 0, pkRoot at slot 1.
+    # storage at deploy time. The deployed ethrex runtime (legacy/script/
+    # deploy_frame_account.py) stores pkSeed at slot 0, pkRoot at slot 1.
+    # src/SphincsFrameAccount.sol keeps them as immutables instead, so for that
+    # contract read pkSeed() / pkRoot() rather than raw slots.
     stored_seed = rpc("eth_getStorageAt", [frame_account, "0x0", "latest"], rpc_url)
     stored_root = rpc("eth_getStorageAt", [frame_account, "0x1", "latest"], rpc_url)
     if stored_seed.lower() != pk_seed_hex.lower():
