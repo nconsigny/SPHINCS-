@@ -13,6 +13,11 @@
 //! `Th(P, tw, M) = keccak256(P | tw | M)` truncated to its first `n = 16` bytes, with a 16-byte address `tw` (8 bytes
 //! of fields, 8 zero bytes). Every hash call goes through [`hash`], which also counts keccak256 calls (thread-local)
 //! so tests can check the costs.
+//!
+//! [`key_gen`] and [`sign`] hold a key's whole kept subtree in memory and regenerate it per run. The one-signer tiers
+//! ([`Tier`], [`keygen_cached`], [`sign_with_cache`], the key file of [`keyfile`]) generate the key once and store it
+//! with a node cache of bounded size, from which every signature recomputes only what is not cached: the same keys and
+//! the same signature bytes.
 
 mod hash;
 pub use hash::*;
@@ -22,6 +27,10 @@ mod fors;
 pub use fors::*;
 mod scheme;
 pub use scheme::*;
+mod tiers;
+pub use tiers::*;
+pub mod keyfile;
+pub use keyfile::*;
 
 /// `n`: hash value and Merkle node length, in bytes.
 pub const N: usize = 16;

@@ -77,6 +77,17 @@ pub fn wots_recover(pp: &PublicParam, e: u32, m: &Digest, c: u32, signature: &[D
     Some(wots_leaf_hash(pp, e, &ends))
 }
 
+/// The Merkle leaf of the one-time key at `e`, from the master secret: 32 secret pairs, `64 * 3` chain steps and the
+/// leaf hash, [`WOTS_LEAF_CALLS`] keccak256 calls.
+pub fn wots_leaf(pp: &PublicParam, master: &MasterSecret, e: u32) -> Digest {
+    wots_leaf_hash(pp, e, &wots_ends(pp, master, e))
+}
+
+/// keccak256 calls of [`wots_leaf`].
+pub const WOTS_LEAF_CALLS: u64 = (V / 2 + V * (CHAIN_LEN - 1) + 1) as u64;
+
+const _: () = assert!(WOTS_LEAF_CALLS == 225);
+
 /// The chain ends of the one-time key at `e`, from the master secret.
 pub fn wots_ends(pp: &PublicParam, master: &MasterSecret, e: u32) -> [Digest; V] {
     let secrets = wots_secrets(pp, master, e);

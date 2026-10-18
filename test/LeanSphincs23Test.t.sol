@@ -27,8 +27,10 @@ import "../src/keccak/LeanSphincs-23Asm.sol";
 ///           half), and dirty ABI padding past the signature on every vector.
 ///         - Gas: a ceiling on the gas verify spends in its own call frame, on the known answers
 ///           and on every random-digest signature.
-///         - FFI: a fresh signature from the Rust CLI (skipped when it is not built, except under
-///           CI; fails when the binary is older than the crate sources).
+///         - FFI: a fresh signature from the Rust CLI, and one from a Light-tier key file
+///           (`ls23k keygen` + `sign-key`, spec §14), which must equal the stateless signer's
+///           bytes (skipped when the CLI is not built, except under CI; fails when the binary is
+///           older than the crate sources).
 ///         Requires fs read access to test/fixtures (see `fs_permissions` in foundry.toml).
 contract LeanSphincs23Test is Test {
     LeanSphincs23Asm verifier;
@@ -41,6 +43,13 @@ contract LeanSphincs23Test is Test {
         "if [ ! -x $b ]; then echo missing; "
         "elif [ -n \"$(find $d/Cargo.toml $d/Cargo.lock $d/src -newer $b \\( -name '*.rs' -o -name 'Cargo.*' \\) "
         "2>/dev/null | head -n 1)\" ]; then echo stale; else echo fresh; fi";
+    // `sh -c LS23K_LIGHT_SIGN sh <ls23k> <seed> <msg>`: a Light-tier key file in a fresh `mktemp -d`
+    // directory, the seed on keygen's standard input, then `sign-key`, whose output is the script's.
+    // The key file is removed and the directory with it, non-recursively: `rmdir` fails, and so
+    // does the script, if keygen left anything else there.
+    string constant LS23K_LIGHT_SIGN = "d=$(mktemp -d) || exit 1; k=\"$d/light.key\"; "
+        "printf '%s\\n' \"$2\" | \"$1\" keygen --seed-stdin --tier light -o \"$k\" >/dev/null "
+        "&& \"$1\" sign-key \"$k\" \"$3\"; s=$?; rm -f -- \"$k\"; rmdir -- \"$d\" || s=1; exit $s";
 
     uint256 constant SIG_LEN = 4148;
 
@@ -616,6 +625,48 @@ contract LeanSphincs23Test is Test {
         assertTrue(ok, "Rust CLI signature must verify");
         emit log_named_uint("leanSphincs-23 verify gas, call frame (rust sig)", used);
         assertLe(used, VERIFY_GAS_MAX, "verify gas ceiling (call frame), rust sig");
+        assertFalse(verifier.verify(pkSeed, pkRoot, message ^ bytes32(uint256(1)), sig), "wrong message");
+    }
+
+    /// The tiered signer (spec §14): `ls23k keygen --seed-stdin --tier light` (b = 13, a 16 KiB
+    /// node cache, about 1.85e6 keccak256 calls) writes a key file into a `mktemp -d` directory,
+    /// `ls23k sign-key` signs from it, and the key file is removed, all in one `sh -c`
+    /// (LS23K_LIGHT_SIGN). The output must verify and be byte-identical to the stateless
+    /// `ls23k sign <seed> 13 <msg>`: the key file changes where the auth path comes from, nothing
+    /// in the signature.
+    function testVerifyFFI_RustLightTierKeyFile() public {
+        _requireLs23k();
+
+        bytes32 seed = keccak256("leanSphincs-23-keccak FFI light-tier seed");
+        bytes32 message = keccak256("leanSphincs-23-keccak FFI light-tier message");
+
+        string[] memory tiered = new string[](7);
+        tiered[0] = "sh";
+        tiered[1] = "-c";
+        tiered[2] = LS23K_LIGHT_SIGN;
+        tiered[3] = "sh";
+        tiered[4] = LS23K;
+        tiered[5] = vm.toString(seed);
+        tiered[6] = vm.toString(message);
+        Vm.FfiResult memory run = vm.tryFfi(tiered);
+        assertEq(run.exitCode, 0, string.concat("ls23k keygen --tier light, sign-key: ", string(run.stderr)));
+
+        string[] memory stateless = new string[](5);
+        stateless[0] = LS23K;
+        stateless[1] = "sign";
+        stateless[2] = vm.toString(seed);
+        stateless[3] = "13";
+        stateless[4] = vm.toString(message);
+        assertEq(run.stdout, vm.ffi(stateless), "sign-key must print what `ls23k sign <seed> 13 <msg>` prints");
+
+        (bytes32 pkSeed, bytes32 pkRoot, bytes memory sig) = abi.decode(run.stdout, (bytes32, bytes32, bytes));
+        assertEq(sig.length, SIG_LEN, "leanSphincs-23 sig must be 4148 bytes");
+
+        bool ok = verifier.verify(pkSeed, pkRoot, message, sig);
+        uint256 used = vm.lastCallGas().gasTotalUsed;
+        assertTrue(ok, "Light-tier key-file signature must verify");
+        emit log_named_uint("leanSphincs-23 verify gas, call frame (light-tier key-file sig)", used);
+        assertLe(used, VERIFY_GAS_MAX, "verify gas ceiling (call frame), light-tier key-file sig");
         assertFalse(verifier.verify(pkSeed, pkRoot, message ^ bytes32(uint256(1)), sig), "wrong message");
     }
 

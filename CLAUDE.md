@@ -61,7 +61,11 @@ forge test --match-contract SphincsC12BlakeTest -vv    # BLAKE2b twin of plain-S
 (cd signers/leansphincs23-keccak && cargo build --release && cargo test --release)
 python3 signers/leansphincs23-keccak/crosscheck.py --jobs 4      # Rust ↔ Python byte for byte (~1 min)
 python3 signers/leansphincs23-keccak/make_kat_fixture.py --check # Forge KAT fixture still reproduces
-forge test --match-contract LeanSphincs23Test -vv   # also selects SphincsAccountLeanSphincs23Test (35 tests)
+python3 signers/leansphincs23-keccak/tier_model.py --check       # sphincs-art tier cost model, pinned figures
+# Tiered signer (spec §14): key file once, then sign-key; seed from --seed-file or --seed-stdin, never argv
+signers/leansphincs23-keccak/target/release/ls23k keygen --seed-stdin --tier light -o light.key < seed.hex
+signers/leansphincs23-keccak/target/release/ls23k sign-key light.key <msg_hex64>   # == ls23k sign <seed> 13 <msg>
+forge test --match-contract LeanSphincs23Test -vv   # also selects SphincsAccountLeanSphincs23Test (36 tests)
 ```
 
 Python env: `pip install eth-account eth-abi requests pycryptodome`.
@@ -216,6 +220,7 @@ So a desktop-class signer that holds the XMSS tree in RAM amortises keygen acros
 ### leanSphincs-23 signers
 
 - `signers/leansphincs23-keccak/` — Rust crate, a port of the upstream leanSphincs crate (`crates/sphincs`, MIT OR Apache-2.0, see `LICENSE.upstream`) with keccak256 (`tiny-keccak`) for BLAKE2s and the leanSphincs-23 parameters; keygen and FORS signing are multithreaded. CLI `ls23k sign|kat|verify`; `sign` prints `0x ‖ abi.encode(pkSeed, pkRoot, sig)` for the Forge FFI tests. `b` is the kept-subtree height of a pruned key (`b = 25` is a full key, ≈ 7.6·10⁹ keccak calls; `≈ 2^b · 226` in general). The FFI tests fail on an `ls23k` older than the crate sources, and under CI also when it is missing.
+- Tiered signer (same crate, `src/tiers.rs`, `src/keyfile.rs`; spec §14) — `ls23k keygen` writes a key file with a bounded node cache for the sphincs-art tiers Light (b=13, 16 KiB), Standard (b=20, 1 MiB) or Full (b=25, 16 MiB), or any `--b`/`--cache-bytes`; `ls23k sign-key` signs from it byte-identically to `ls23k sign <seed> <b> <msg>` (verifier and fixtures unchanged); `ls23k info` prints its plan and costs. The seed comes from `--seed-file`/`--seed-stdin`, never argv; the key file holds it (0600). One seed = one key: never reuse a seed at another `b`. `tier_model.py` transcribes the sphincs-art cost model. Default tests and CI generate keys at b ≤ 13 only (the Standard end to end is `#[ignore]`d).
 - `script/leansphincs23_signer.py` — independent Python signer written from the spec (`--json`, `--verify`, `--selftest`). Grinds about `2^(25−b)` randomizers per signature, so `b ≈ 6..12` in practice.
 - `signers/leansphincs23-keccak/crosscheck.py` — Rust ↔ Python byte equality on 16 pruned-key vectors, cross-verification, and a third spec-literal recomputation. `make_kat_fixture.py` writes (or `--check`s) `test/fixtures/leansphincs23-keccak-kat.json`. CI job `leansphincs23`.
 
