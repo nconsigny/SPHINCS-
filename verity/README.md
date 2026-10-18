@@ -9,12 +9,12 @@ contracts and is not exercised by Foundry.
 
 The Verity models cover only:
 
-- `src/SPHINCs-C13Asm.sol` (keccak; the main production verifier).
-- `src/SLH-DSA-SHA2-128-24verifier.sol` (FIPS 205 external SLH-DSA, empty
+- `src/keccak/SPHINCs-C13Asm.sol` (keccak; the main production verifier).
+- `src/sha/SLH-DSA-SHA2-128-24verifier.sol` (FIPS 205 external SLH-DSA, empty
   context, SHA-256 precompile).
 
-The other live production verifiers, `src/SPHINCs-C7Asm.sol` and
-`src/SPHINCs-C9Asm.sol`, are **not** modeled and **not** verified here. They
+The other live production verifiers, `src/keccak/SPHINCs-C7Asm.sol` and
+`src/keccak/SPHINCs-C9Asm.sol`, are **not** modeled and **not** verified here. They
 should be treated as unverified code.
 
 The C12 Verity model has been removed: C12 lives in `legacy/` and is no

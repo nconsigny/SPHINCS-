@@ -1,6 +1,6 @@
 # noble-post-quantum SLH-DSA-SHA2-128-24 signer
 
-A second, independent off-chain signer for the live `src/SLH-DSA-SHA2-128-24verifier.sol`
+A second, independent off-chain signer for the live `src/sha/SLH-DSA-SHA2-128-24verifier.sol`
 verifier, backed by [`@noble/post-quantum`](https://github.com/paulmillr/noble-post-quantum)'s
 SLH-DSA engine instead of the forked C reference (`signers/sphincsplus-128-24/`).
 

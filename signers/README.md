@@ -14,16 +14,21 @@ directory), and thin Python drivers/reference signers under `script/`.
 
 | Verifier | Signer | Lang | Location | Notes |
 |---|---|---|---|---|
-| **C7 / C9 / C13** (`src/`, keccak, WOTS+C/FORS+C) | `signer.py` | Python | `script/signer.py` | C6–C13; `adrs_mode` = `fips` (live) or `jardin` (legacy). Slow. |
+| **C7 / C9 / C10 / C11 / C13** (`src/keccak/`, WOTS+C/FORS+C) | `signer.py` | Python | `script/signer.py` | Live variants `c7` / `c9` / `c10-fips` / `c11` / `c13` (`adrs_mode=fips`); `c6` / `c8` / `c10` / `c11-jardin` drive the JARDIN-layout `legacy/` verifiers. Slow. |
 | **C13** | `signer-c13` + WASM | Rust | `signers/signer-wasm/` | Crate `sphincs-c13-signer`. CLI `signer-c13` is the fast path for the C13 forge FFI tests; `lib.rs` is the WASM signer (BIP-39/44 derivation). |
 | **C13** (validation only) | `crosscheck.py` | Python | `signers/c13-crosscheck/` | Three-way Python ⟷ Rust ⟷ verifier byte-equality. |
-| **SLH-DSA-SHA2-128-24** (`src/`, live) | `slh_dsa_sha2_128_24_signer.py` | Python | `script/` | Pure-Python FIPS-205 reference. Hours at NIST params — use `--height/--a` for dev. |
+| **C12** (plain SPHINCS+, `src/keccak/`) | `spx_fips_signer.py` | Python | `script/` | FIPS-ADRS twin of `jardin_spx_signer.py` (reuses it with `l=46`). |
+| **C10-SHA / C11-SHA / C13-SHA** (`src/sha/`) | `signer.py` | Python | `script/signer.py` | Variants `c10-sha` / `c11-sha` / `c13-sha` (SHA-256 + 22-byte ADRSc; not FIPS). |
+| **C12-SHA** (`src/sha/`) | `slh_dsa_sha2_c12_signer.py` | Python | `script/` | Full FIPS 205 SLH-DSA-SHA2 algorithm at the C12 parameters. |
+| **C11-BLAKE / C13-BLAKE** (`src/blake/`) | `signer.py` | Python | `script/signer.py` | Variants `c11-blake` / `c13-blake` (BLAKE2b, FIPS uncompressed ADRS). |
+| **C12-BLAKE** (`src/blake/`) | `spx_blake_signer.py` | Python | `script/` | BLAKE2b twin of `spx_fips_signer.py`. |
+| **SLH-DSA-SHA2-128-24** (`src/sha/`, live) | `slh_dsa_sha2_128_24_signer.py` | Python | `script/` | Pure-Python FIPS-205 reference. Hours at NIST params — use `--height/--a` for dev. |
 | ″ | C reference | C | `signers/sphincsplus-128-24/` | Fork of sphincs/sphincsplus, `w=4` added. ~1–3 min/sign. Backend for the fast signer + the FIPS oracle. |
 | ″ | `slh_dsa_sha2_128_24_fast_signer.py` | Python | `script/` | Wrapper: JARDIN key derivation → C binary → disk cache. Used by the forge FFI tests. |
 | ″ | `slh_dsa_sha2_128_24_signer.mjs` | JS | `signers/noble-slh-dsa/` | Patched `@noble/post-quantum`. Drop-in for the fast signer; validated byte-for-byte vs the C ref and the pinned on-chain KAT. |
 | ″ | `slhdsa-sha2-128-24-gpu` | C + Vulkan | `signers/slhvk-sha2-128-24/` | GPU-accelerated SLH-DSA (conduition `slhvk` fork). Driven by `script/slh_dsa_sha2_128_24_gpu_signer.py`. |
 | **SLH-DSA-Keccak-128-24** (`legacy/`, retired) | `slh_dsa_keccak_128_24_signer.py` / C fork | Python / C | `script/`, `signers/jardin-keccak-128-24/` | JARDIN-convention keccak twin + its `*_fast_signer.py` wrapper. Frozen. |
-| **C12** (plain SPHINCS+, `legacy/`, retired) | `jardin_spx_signer.py` | Python | `script/` | Self-contained; shares `jardin_primitives.py` with the JARDIN repo. |
+| **C12** (plain SPHINCS+, `legacy/`, retired, JARDIN ADRS) | `jardin_spx_signer.py` | Python | `script/` | Self-contained; shares `jardin_primitives.py` with the JARDIN repo. |
 
 ## `signers/` directory contents
 
@@ -55,7 +60,8 @@ directory), and thin Python drivers/reference signers under `script/`.
   (`test/SLH-DSA-SHA2-128-24-KAT.t.sol`).
 
 CI (`.github/workflows/ci.yml`) runs the fast reduced-parameter cross-checks
-(`rust-signer`, `slh-crosscheck`, `noble-crosscheck`) and the full forge suite
-on every push.
+(`rust-signer`, `slh-crosscheck`, `noble-crosscheck`), the full forge suite
+(`solidity`) and the frozen `legacy/` suites (`legacy-verifiers`) on every push
+to `main` and on every pull request.
 
 > **Not audited, not production-safe.**

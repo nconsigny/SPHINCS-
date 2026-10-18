@@ -7,6 +7,8 @@
 > magnitude (base-2 log) estimates in the random-oracle model for keccak256 /
 > SHA-256; constants and lower-order terms are dropped. This is a research
 > prototype — **not audited, not production-safe.**
+>
+> Finding IDs (`C13-*`, `SLH-*`) are defined in [SECURITY-REVIEW-C13-SLHDSA.md](SECURITY-REVIEW-C13-SLHDSA.md); `L-*`/`I-*` in [SECURITY-REVIEW-C11-C12-SHA2.md](SECURITY-REVIEW-C11-C12-SHA2.md).
 
 C13 parameters: `n=128` (16-byte hashes), `h=22`, `d=2`, `subtree_h=11`,
 `a=19`, `k=7`, `w=8`, `l=43`, `target_sum=208`, per-key signature cap `2^22`.

@@ -9,7 +9,7 @@
   `Compiler/Proofs/IRGeneration/SourceSemantics.lean`).
 
   It is ADDITIVE: it does not touch `axiom c13Primitives`, `execC13`, the bridge
-  axioms, or `Model.lean`. It models `src/SPHINCs-C13Asm.sol` faithfully.
+  axioms, or `Model.lean`. It models `src/keccak/SPHINCs-C13Asm.sol` faithfully.
 
   ## The hash bridge (STEP 1)
 

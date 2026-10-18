@@ -1,6 +1,6 @@
 # C13 Interface Contract
 
-This file records the segment map for the modeled C13 verifier. It is derived from `c13VerifyBody` in `Model.lean` and the live Solidity assembly in `src/SPHINCs-C13Asm.sol`.
+This file records the segment map for the modeled C13 verifier. It is derived from `c13VerifyBody` in `Model.lean` and the live Solidity assembly in `src/keccak/SPHINCs-C13Asm.sol`.
 
 ## Preflight
 

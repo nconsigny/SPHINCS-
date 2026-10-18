@@ -4,7 +4,7 @@ SLH-DSA-Keccak-128-24 signer (JARDIN-style Keccak variant).
 
 Implements the NIST SP 800-230 SLH-DSA-*-128-24 parameter set with the
 JARDIN family conventions (32-byte ADRS, keccak256 truncated to 16B,
-LSB-first digest parsing).  Pairs with src/SLH-DSA-keccak-128-24verifier.sol.
+LSB-first digest parsing).  Pairs with legacy/src/SLH-DSA-keccak-128-24verifier.sol.
 
 Parameters:
     n  = 16     128-bit security

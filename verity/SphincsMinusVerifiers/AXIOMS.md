@@ -3,8 +3,8 @@
 Status date: 2026-06-11
 
 This directory models only the two live verifiers: the C13 keccak verifier
-(`src/SPHINCs-C13Asm.sol`) and the SLH-DSA-SHA2-128-24 verifier
-(`src/SLH-DSA-SHA2-128-24verifier.sol`). C7 and C9 remain live Solidity
+(`src/keccak/SPHINCs-C13Asm.sol`) and the SLH-DSA-SHA2-128-24 verifier
+(`src/sha/SLH-DSA-SHA2-128-24verifier.sol`). C7 and C9 remain live Solidity
 contracts but are not modeled here. The Lean models are hand-transcribed from
 the Solidity assembly; they are not compiled into production contracts, not
 deployed, and not replayed in Foundry.
