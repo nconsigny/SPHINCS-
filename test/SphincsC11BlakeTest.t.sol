@@ -55,7 +55,29 @@ contract SphincsC11BlakeTest is Test {
         assertFalse(_verifySilent(cachedSeed, cachedRoot, bytes32(uint256(MSG) ^ 1), cachedSig), "wrong msg must reject");
     }
 
+    /// @dev Flip a bit in the canonical (top) half of the root. A low-bit flip would make the
+    ///      key non-canonical and stop at the "Invalid public key" guard instead.
     function testC11BlakeRejectsWrongRoot() public view {
-        assertFalse(_verifySilent(cachedSeed, bytes32(uint256(cachedRoot) ^ 1), MSG, cachedSig), "wrong root must reject");
+        assertFalse(_verifySilent(cachedSeed, bytes32(uint256(cachedRoot) ^ (1 << 200)), MSG, cachedSig), "wrong root must reject");
+    }
+
+    function _flip(bytes memory s, uint256 pos) internal pure returns (bytes memory t) {
+        t = bytes.concat(s);
+        t[pos] = bytes1(uint8(t[pos]) ^ 0x01);
+    }
+
+    /// @dev Corruptions in the TOP hypertree layer leave H_msg and every earlier digest
+    ///      unchanged, so they pass the forced-zero and target-sum gates and are caught only
+    ///      by the final root comparison. (HT_START 2336; layer = 43*16 + 4 + 8*16 = 820.)
+    function testC11BlakeRejectsCorruptedTopLayer() public view {
+        assertFalse(_verifySilent(cachedSeed, cachedRoot, MSG, _flip(cachedSig, 3960)), "corrupted last auth node must reject");
+        assertFalse(_verifySilent(cachedSeed, cachedRoot, MSG, _flip(cachedSig, 3156)), "corrupted top-layer WOTS chain must reject");
+    }
+
+    function testC11BlakeRevertsOnNonCanonicalKey() public {
+        vm.expectRevert(bytes("Invalid public key"));
+        verifier.verify(cachedSeed, bytes32(uint256(cachedRoot) | 1), MSG, cachedSig);
+        vm.expectRevert(bytes("Invalid public key"));
+        verifier.verify(bytes32(uint256(cachedSeed) | 1), cachedRoot, MSG, cachedSig);
     }
 }

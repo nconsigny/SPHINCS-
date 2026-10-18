@@ -8,9 +8,15 @@ import "forge-std/Test.sol";
 /// @dev Isolated harness for the BLAKE2b-over-0x09 kernel used by the src/blake/
 ///      verifiers. Validates the LE/BE endianness bridge against hashlib.blake2b
 ///      reference vectors BEFORE the kernel is wired into any SPHINCS+ verifier.
-///      The blake2b()/bswap64() Yul functions here are the exact kernel that will
-///      be copied into each src/blake verifier (with inPtr=0x00 there; here the
-///      input is copied to 0x80 to preserve the Solidity free-memory pointer).
+///      The blake2b() Yul function here is the exact kernel copied into each
+///      src/blake verifier (with inPtr=0x00 there; here the input is copied to 0x80
+///      to preserve the Solidity free-memory pointer; the verifiers also place the
+///      scratch S at 0xA00, above their fixed single-block F/H precompile buffers at
+///      0x800/0x900). Keep them in lockstep. The verifiers' F/H fast path (one block,
+///      constant IV and t/f) is not this kernel; it is covered end to end by the
+///      SphincsC1{1,2,3}BlakeTest signer vectors.
+///      Inputs must stay below 0x780 bytes (0x80 + len must not reach the 0x800
+///      scratch), which also keeps the kernel's 2-byte counter swap exact.
 contract Blake2bHarness {
     function h16(bytes calldata input) external view returns (bytes32) {
         return _run(input, 16);
@@ -23,6 +29,7 @@ contract Blake2bHarness {
     function _run(bytes calldata input, uint256 nn) internal view returns (bytes32 out) {
         assembly {
             let len := input.length
+            if gt(len, 0x780) { revert(0, 0) } // input at 0x80 must not reach the 0x800 scratch
             calldatacopy(0x80, input.offset, len) // keep 0x00..0x80 (FMP/zero-slot) intact
             out := blake2b(0x80, len, nn)
 
@@ -30,66 +37,31 @@ contract Blake2bHarness {
             // compression precompile. Returns the digest top-aligned in a 256-bit word
             // (nn=16 → 16 bytes in the high half, low half zero; nn=32 → full word).
             function blake2b(inPtr, inLen, nnLocal) -> result {
-                let S := 0x800 // scratch for the 213-byte precompile input (clear of inPtr region); matches src/blake/
-
-                // rounds = 12 (big-endian, first 4 bytes)
-                mstore(S, shl(224, 12))
-
-                // init state h: 8 little-endian 64-bit words at S+4..S+68.
-                // h0 = IV0 ^ 0x01010000 ^ nn (kk=0); h1..h7 = IV1..IV7.
-                let h0 := bswap64(xor(xor(0x6a09e667f3bcc908, 0x01010000), nnLocal))
-                mstore(add(S, 4), or(or(shl(192, h0), shl(128, bswap64(0xbb67ae8584caa73b))),
-                                     or(shl(64, bswap64(0x3c6ef372fe94f82b)), bswap64(0xa54ff53a5f1d36f1))))
-                mstore(add(S, 36), or(or(shl(192, bswap64(0x510e527fade682d1)), shl(128, bswap64(0x9b05688c2b3e6c1f))),
-                                      or(shl(64, bswap64(0x1f83d9abfb41bd6b)), bswap64(0x5be0cd19137e2179))))
-
-                let remaining := inLen
-                let blockOff := 0
+                let S := 0x800
+                mstore(S, shl(224, 12)) // rounds = 12 (big-endian)
+                // init state h: IV as 8 little-endian 64-bit words, byte-swapped at authoring
+                // time (no runtime bswap). h0 = IV0 ^ 0x01010000 ^ nn (kk=0); nn < 256 only
+                // touches IV0's low byte = its first LE byte, hence the shl(248, nn).
+                mstore(add(S, 4), xor(0x08c9bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5, shl(248, nnLocal)))
+                mstore(add(S, 36), 0xd182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b)
                 let processed := 0
                 for {} 1 {} {
-                    let thisLen := 128
-                    let isLast := 0
-                    if lt(remaining, 128) { thisLen := remaining isLast := 1 }
-                    if eq(remaining, 128) { isLast := 1 }
+                    let thisLen := sub(inLen, processed)
+                    let isLast := 1
+                    if gt(thisLen, 128) { thisLen := 128 isLast := 0 }
+                    // m field (128 bytes): thisLen raw bytes (no swap), zero-padded on the last block
+                    mcopy(add(S, 68), add(inPtr, processed), thisLen)
+                    if isLast { calldatacopy(add(add(S, 68), thisLen), calldatasize(), sub(128, thisLen)) }
                     processed := add(processed, thisLen)
-
-                    // m field (128 bytes): zero then copy thisLen raw bytes (no swap — BLAKE2b
-                    // reads the message block as 16 LE words, which is the raw byte order).
-                    mstore(add(S, 68), 0) mstore(add(S, 100), 0)
-                    mstore(add(S, 132), 0) mstore(add(S, 164), 0)
-                    let src := add(inPtr, blockOff)
-                    let dst := add(S, 68)
-                    let full := and(thisLen, not(31))
-                    let o := 0
-                    for {} lt(o, full) { o := add(o, 32) } { mstore(add(dst, o), mload(add(src, o))) }
-                    let rest := and(thisLen, 31)
-                    if rest {
-                        let mask := not(shr(mul(rest, 8), not(0))) // top `rest` bytes set
-                        mstore(add(dst, o), and(mload(add(src, o)), mask))
-                    }
-
-                    // t_0 = processed (LE), t_1 = 0 (clears bytes through the f slot)
-                    mstore(add(S, 196), shl(192, bswap64(processed)))
-                    mstore8(add(S, 212), isLast) // final-block flag
-
+                    // t_0 = processed as LE u64, t_1 = 0, f = isLast (byte S+212 = bit 120).
+                    // 2-byte LE swap is exact because every inLen here is < 2^16 (max 0x600).
+                    mstore(add(S, 196), or(or(shl(248, and(processed, 0xff)), shl(240, shr(8, processed))), shl(120, isLast)))
                     // compress; output (new state) overwrites the h field in place
                     if iszero(staticcall(gas(), 0x09, S, 213, add(S, 4), 64)) { revert(0, 0) }
-
-                    remaining := sub(remaining, thisLen)
-                    blockOff := add(blockOff, 128)
-                    if iszero(remaining) { break }
+                    if isLast { break }
                 }
-
-                switch nnLocal
-                case 16 { result := and(mload(add(S, 4)), 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000) }
-                default { result := mload(add(S, 4)) }
-            }
-
-            function bswap64(x) -> y {
-                for { let i := 0 } lt(i, 8) { i := add(i, 1) } {
-                    y := or(shl(8, y), and(x, 0xff))
-                    x := shr(8, x)
-                }
+                result := mload(add(S, 4))
+                if eq(nnLocal, 16) { result := and(result, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000) }
             }
         }
     }
@@ -159,6 +131,32 @@ contract Blake2bKernelTest is Test {
         bytes memory b = _seq(384, 7, 0);
         assertEq(h.h16(b), bytes32(uint256(0xe6be43a2ad0479eddecb2156d202c43a) << 128));
         assertEq(h.h32(b), bytes32(uint256(0xc1657697b6e9c44f9086f3103635482bdb0f16550335765aad643f155aa714c0)));
+    }
+
+    // Block-boundary neighbours (127/129/255) and C12-BLAKE's T_l length (1536 = 0x600,
+    // the largest input any src/blake verifier hashes). All _seq(n,7,0).
+    function test_127() public view {
+        bytes memory b = _seq(127, 7, 0);
+        assertEq(h.h16(b), bytes32(uint256(0x40efb3ed1b6eb973c5f774422adb0230) << 128));
+        assertEq(h.h32(b), bytes32(uint256(0x4ff62e7c4c43fe101a078479c48836be4907d9d498dcc577ca89d694b2c11f9b)));
+    }
+
+    function test_129() public view {
+        bytes memory b = _seq(129, 7, 0);
+        assertEq(h.h16(b), bytes32(uint256(0x2ec7e7bf8a8265ffd68aadd70ecd2b7e) << 128));
+        assertEq(h.h32(b), bytes32(uint256(0x3934215260b1039be9d9d2b073b059bcd50120c327a22af93eb4d98cf821c14c)));
+    }
+
+    function test_255() public view {
+        bytes memory b = _seq(255, 7, 0);
+        assertEq(h.h16(b), bytes32(uint256(0xb4b6fa7ac93abe0503b7ac802593eadd) << 128));
+        assertEq(h.h32(b), bytes32(uint256(0xa3bb8b4fa098078d32bb5a89e905e237862fd83e99141ca7d8a073bb268ba2a0)));
+    }
+
+    function test_1536() public view {
+        bytes memory b = _seq(1536, 7, 0);
+        assertEq(h.h16(b), bytes32(uint256(0x480e2938156ec4548e311310aa107cda) << 128));
+        assertEq(h.h32(b), bytes32(uint256(0xf62734fdc4ebbb200a0c6c58803addce49f1ba0f5b8d408aa9b66cd26a4fff01)));
     }
 
     function test_1440() public view {
