@@ -13,8 +13,9 @@ SPHINCs- is a research prototype for lightweight SPHINCS+ variants on Ethereum. 
 5. **SLH-DSA-128-24** — NIST SP 800-230 parameter set (d=1, h=22, a=24, k=6, w=4). Two variants:
    - FIPS 205 **external** SLH-DSA-SHA2 (`src/sha/SLH-DSA-SHA2-128-24verifier.sol`), empty-context envelope (`M' = 0x00‖0x00‖M`); SHA-256 precompile at 0x02. Matches NIST/ACVP external KATs.
    - JARDIN-convention Keccak twin (`legacy/src/SLH-DSA-keccak-128-24verifier.sol`, retired), native `keccak256`. Retired to `legacy/` alongside the other JARDIN-layout verifiers; the SHA-2 variant is the live one.
+6. **leanSphincs-23** (`src/keccak/LeanSphincs-23Asm.sol`) — Tom Wambsgans' leanSphincs (one XMSS layer + FORS + WOTS+C) at the [sphincs-art](https://nconsigny.github.io/sphincs-art/) leanSphincs-23 parameters: n=16, h=25, d=1, FORS k=13 a=12 (no tree roots), WOTS+C with 64 chains of 4 positions (w=4) and target sum T=128. **keccak256 replaces BLAKE2s and nothing else changes** (tweaks, byte order, serialization are the upstream crate's). 4,148-B sig, ~39 K verify (constant 249 keccak256 calls). Lifetimes per sphincs-art (estimates): 2²³ full key, 2²¹ for a 2²⁰ subtree, 20 K for a 2¹³ (Ledger) subtree. Keys are pruned subtrees the verifier cannot tell from a full key. Spec: `docs/leanSphincs-23-keccak.md` (§5 pins the `a = 12` digest layout, which upstream leaves open). Same `verify` interface as the C-series.
 
-Accounts present in this repo use the C-series: `SphincsAccount` (ERC-4337), `SphincsAccountFactory`, `SphincsFrameAccount` (EIP-8141). The JARDIN hybrid-account stack (ECDSA + SPHINCs-) lives in the separate [nconsigny/JARDIN](https://github.com/nconsigny/JARDIN) repo.
+Accounts present in this repo use the C-series: `SphincsAccount` (ERC-4337), `SphincsAccountFactory`, `SphincsFrameAccount` (EIP-8141). `SphincsAccount` also takes the leanSphincs-23 verifier unchanged (`test/SphincsAccountLeanSphincs23Test.t.sol`). The JARDIN hybrid-account stack (ECDSA + SPHINCs-) lives in the separate [nconsigny/JARDIN](https://github.com/nconsigny/JARDIN) repo.
 
 **Not audited, not production-safe.**
 
@@ -55,6 +56,12 @@ forge test --match-contract Blake2bKernelTest -vv      # BLAKE2b-over-0x09 kerne
 forge test --match-contract SphincsC11BlakeTest -vv    # BLAKE2b twin of C11
 forge test --match-contract SphincsC13BlakeTest -vv    # BLAKE2b twin of C13
 forge test --match-contract SphincsC12BlakeTest -vv    # BLAKE2b twin of plain-SPHINCS+ C12
+
+# leanSphincs-23 over keccak256 (Rust signer ls23k + independent Python signer):
+(cd signers/leansphincs23-keccak && cargo build --release && cargo test --release)
+python3 signers/leansphincs23-keccak/crosscheck.py --jobs 4      # Rust ↔ Python byte for byte (~1 min)
+python3 signers/leansphincs23-keccak/make_kat_fixture.py --check # Forge KAT fixture still reproduces
+forge test --match-contract LeanSphincs23Test -vv   # also selects SphincsAccountLeanSphincs23Test (35 tests)
 ```
 
 Python env: `pip install eth-account eth-abi requests pycryptodome`.
@@ -75,8 +82,9 @@ Every verifier is deployed once as a stateless pure contract and shared by all a
 
 ### ADRS layout discipline
 
-Every verifier in `src/` now uses **one of only two address layouts**; the JARDIN
-32-byte layout has been retired to `legacy/` (see "Retired layout" below):
+Every SPHINCS+-family verifier in `src/` now uses **one of only two address layouts**; the JARDIN
+32-byte layout has been retired to `legacy/` (see "Retired layout" below). leanSphincs-23 is
+outside this rule (see the note after "Current users"):
 
 1. **FIPS 205 §4.2 uncompressed 32-byte ADRS** + keccak256 — the SHAKE-instantiation form with keccak swapped in for SHAKE-256. Layout: `layer(4) ‖ tree(12) ‖ type(4) ‖ word1(4) ‖ word2(4) ‖ word3(4)`. Word semantics per type (FIPS 205 Table 1):
    - 0 WOTS_HASH:  word1=kp, word2=chain_address, word3=hash_address
@@ -93,12 +101,14 @@ Current users (everything in `src/`):
 
 The two ADRS *byte layouts* in `src/` are therefore still just two (FIPS uncompressed 32 B for keccak, FIPS ADRSc 22 B for SHA-2); the SHA twins reuse the existing ADRSc.
 
+**leanSphincs-23 is not a SPHINCS+ ADRS scheme**, so the FIPS-ADRS rule (and the MUST below) does not apply to it. `src/keccak/LeanSphincs-23Asm.sol` keeps leanSphincs's own 16-byte tweak verbatim from the upstream crate: `LE32(lo) ‖ LE24(hi) ‖ (t | step<<5) ‖ 0^8`, hash input `P(16) ‖ tweak(16) ‖ payload`, so `P ‖ tweak` is one EVM word. Changing the tweak would make it a different scheme from leanSphincs; spec §3 is authoritative.
+
 Retired layout (`legacy/`, frozen — not maintained):
 - **SLH-DSA-Keccak-128-24**, plus the JARDIN-layout **C11/C12 originals**: the older JARDIN 32 B layout (`layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4`) + keccak256. The keccak SLH-DSA twin was never migrated; the C11/C12 JARDIN originals are kept frozen for benchmark reproducibility and (C12) for the JARDIN repo's `JardinSpxVerifier` reference, while their migrated FIPS twins are the live `src/` verifiers.
 
 JARDIN's structural divergence from FIPS uncompressed is a shorter tree field (8 B vs 12 B) and a 4th type-dependent word (`ha`) that is never actually populated by any type. The visible difference between layouts is that JARDIN's `ci` (chain_index, WOTS-only) and `cp`/`ha` (height/index, TREE-only) live at distinct byte positions; FIPS overloads `word2` and `word3` per type. Both layouts are sound; FIPS is the cross-impl interop choice.
 
-**New keccak-family verifiers MUST use FIPS uncompressed** — JARDIN is a frozen legacy layout, not an option for new work. The JARDIN-aware signers in `script/signer.py` (`cfg["adrs_mode"]` defaulting to JARDIN) still drive the legacy C6/C8/C10 paths (`c10` stays JARDIN for `legacy/src/`; the promoted twin is `c10-fips`); live C7/C9/C10/C11/C13 set `cfg["adrs_mode"]="fips"`, and `signers/signer-wasm` is C13-only. The plain-SPX C12 FIPS signer is `script/spx_fips_signer.py` (wraps the shared `jardin_spx_signer.py`). Only touch JARDIN ADRS code to keep a `legacy/` verifier reproducible.
+**New keccak-family SPHINCS+ verifiers MUST use FIPS uncompressed** — JARDIN is a frozen legacy layout, not an option for new work. The JARDIN-aware signers in `script/signer.py` (`cfg["adrs_mode"]` defaulting to JARDIN) still drive the legacy C6/C8/C10 paths (`c10` stays JARDIN for `legacy/src/`; the promoted twin is `c10-fips`); live C7/C9/C10/C11/C13 set `cfg["adrs_mode"]="fips"`, and `signers/signer-wasm` is C13-only. The plain-SPX C12 FIPS signer is `script/spx_fips_signer.py` (wraps the shared `jardin_spx_signer.py`). Only touch JARDIN ADRS code to keep a `legacy/` verifier reproducible.
 
 ### Shared hash kernel (legacy phrasing, kept for context)
 
@@ -108,7 +118,7 @@ The legacy **C-series (C6/C8/C10) and SLH-DSA-Keccak** verifiers in `legacy/` sh
 
 Verifiers are split by hash function: `src/keccak/` and `src/sha/`. Accounts stay in `src/` root (they reference a verifier by address, no import dependency).
 
-**`src/keccak/`** (keccak256 opcode, FIPS uncompressed 32-byte ADRS):
+**`src/keccak/`** (keccak256 opcode; FIPS uncompressed 32-byte ADRS, except leanSphincs-23):
 
 | File | Purpose |
 |---|---|
@@ -118,6 +128,7 @@ Verifiers are split by hash function: `src/keccak/` and `src/sha/`. Accounts sta
 | `SPHINCs-C11Asm.sol` | C-series verifier, n=128, h=16 d=2 a=11 k=13 w=8. 3,976-B sig, ~87 K verify. ~86-bit at 2²⁰ cap — prefer C13 when verify-time security matters. |
 | `SPHINCs-C12Asm.sol` | Plain SPHINCS+ (SPX) verifier, n=16, h=20 d=5 a=7 k=20 w=8 l=46. 6,592-B sig, ~204 K verify (the Forge e2e test prints ~665 K because it also copies the cached sig out of storage). JARDIN original kept in `legacy/src/` as `JardinSpxVerifier`. |
 | `SPHINCs-C13Asm.sol` | C-series verifier, n=128, h=22 d=2 a=19 k=7 w=8. 3,688-B sig, ~105 K verify. Pinned by the `verity/` Lean model, so it does not yet have the loop optimisations (in-place T buffers, incremental auth climbs, ADRS-as-counter chains, SWAR checksum) that took C7/C9/C10/C11/C12 down ~22–24 %; until it does, C7 is cheaper at 128-bit. First verifier on the FIPS uncompressed layout. |
+| `LeanSphincs-23Asm.sol` | leanSphincs-23 verifier (keccak256 for BLAKE2s), n=16, h=25 d=1, FORS a=12 k=13, WOTS+C w=4 (64 chains) T=128. 4,148-B sig, ~39 K verify (249 keccak256 calls; 38,366–39,395 in-frame for any admissible signature, gated at 39,600 via `vm.lastCallGas`; 40.3–40.5 K as a `gasleft()` delta around the external call). leanSphincs's own 16-byte tweak, not a FIPS ADRS. Spec: `docs/leanSphincs-23-keccak.md`. |
 
 **`src/sha/`** (SHA-256 precompile 0x02, FIPS §11.2 compressed 22-byte ADRSc):
 
@@ -203,6 +214,12 @@ So a desktop-class signer that holds the XMSS tree in RAM amortises keygen acros
 - `script/slh_dsa_sha2_128_24_fast_signer.py`, `script/slh_dsa_keccak_128_24_fast_signer.py` — Python wrappers that derive seeds via JARDIN HMAC-SHA-512, invoke the C binary, cache the result on disk. Used by the Forge FFI tests.
 - `signers/noble-slh-dsa/` — independent pure-JS signer for the SHA-2 variant, backed by [`@noble/post-quantum`](https://github.com/paulmillr/noble-post-quantum). The SHA-2-128-24 verifier is a FIPS 205 *external* SLH-DSA verify at a custom set, so a 6-edit-patched noble engine (`patch-noble.mjs`: export `gen`/`SHA256_SIMPLE`, generalize Winternitz `w`, widen the key-pair-address field for h'=22) reproduces it. Validated **byte-for-byte** against the C reference (reduced-param `crosscheck.mjs`) and the pinned on-chain KAT (`kat-check.mjs`); CI job `noble-crosscheck`. Drop-in for the fast signer: `node slh_dsa_sha2_128_24_signer.mjs <master_sk_hex> <message_hex> [sig_counter]`. **noble cannot sign C13** — WOTS+C/FORS+C counter-grinding over keccak256 is not standard SLH-DSA; use `script/signer.py c13` / `signers/signer-wasm`.
 - `signers/*/crosscheck.py` — Python-vs-C cross-validation at arbitrary h/a.
+
+### leanSphincs-23 signers
+
+- `signers/leansphincs23-keccak/` — Rust crate, a port of the upstream leanSphincs crate (`crates/sphincs`, MIT OR Apache-2.0, see `LICENSE.upstream`) with keccak256 (`tiny-keccak`) for BLAKE2s and the leanSphincs-23 parameters; keygen and FORS signing are multithreaded. CLI `ls23k sign|kat|verify`; `sign` prints `0x ‖ abi.encode(pkSeed, pkRoot, sig)` for the Forge FFI tests. `b` is the kept-subtree height of a pruned key (`b = 25` is a full key, ≈ 7.6·10⁹ keccak calls; `≈ 2^b · 226` in general). The FFI tests fail on an `ls23k` older than the crate sources, and under CI also when it is missing.
+- `script/leansphincs23_signer.py` — independent Python signer written from the spec (`--json`, `--verify`, `--selftest`). Grinds about `2^(25−b)` randomizers per signature, so `b ≈ 6..12` in practice.
+- `signers/leansphincs23-keccak/crosscheck.py` — Rust ↔ Python byte equality on 16 pruned-key vectors, cross-verification, and a third spec-literal recomputation. `make_kat_fixture.py` writes (or `--check`s) `test/fixtures/leansphincs23-keccak-kat.json`. CI job `leansphincs23`.
 
 ### Deploy scripts
 

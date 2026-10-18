@@ -5,7 +5,7 @@
 > finding, then measured patches and old-vs-new trace-equivalence passes) and re-checked by the
 > lead reviewer. No human security professional has signed it off. The code remains
 > **not audited, not production-safe** (see `CLAUDE.md`). Companion to
-> `../SECURITY-REVIEW-C13-SLHDSA.md`, `../SECURITY-REVIEW-C11-C12-SHA2.md` and
+> `SECURITY-REVIEW-C13-SLHDSA.md`, `SECURITY-REVIEW-C11-C12-SHA2.md` and
 > `SECURITY-ANALYSIS.md`.
 
 **Baseline:** `7cb0c55`. The fixes and gas changes below are on branch `review/verifier-fixes`
