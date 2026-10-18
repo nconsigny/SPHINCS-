@@ -5,6 +5,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import "../src/sha/SPHINCs-C10-SHA.sol";
+import "./helpers/OogSweep.sol";
 
 /// @dev End-to-end FFI test for the SHA-256 / 22-byte-ADRSc twin of C10.
 ///      Vectors from `script/signer.py c10-sha` (hash=sha2, adrs_mode=adrsc,
@@ -70,5 +71,16 @@ contract SphincsC10ShaTest is Test {
         (bytes32 s, bytes32 r, bytes memory sig) = abi.decode(vm.ffi(inputs), (bytes32, bytes32, bytes));
         assertEq(sig.length, 4008, "same length, so the length check cannot be what rejects it");
         assertFalse(_verifySilent(s, r, MSG, sig), "keccak-layout sig must not verify here");
+    }
+
+    /// @dev Pop()ed, in-place 0x02 calls: at no gas limit may a valid signature come back
+    ///      `false` (see test/helpers/OogSweep.sol). Sweeps the last 3,000 gas below the
+    ///      smallest limit that verifies, one gas at a time.
+    function testC10ShaOutOfGasNeverReturnsFalse() public view {
+        bytes memory data = abi.encodeWithSelector(verifier.verify.selector, cachedSeed, cachedRoot, MSG, cachedSig);
+        (uint256 minGas, uint256 nFalse, uint256 nTrue) = OogSweep.run(address(verifier), data, 1_000_000, 3000);
+        assertGt(minGas, 3000);
+        assertEq(nTrue, 32, "every limit at or above the minimum must verify");
+        assertEq(nFalse, 0, "a valid sig came back false at a tight gas limit");
     }
 }

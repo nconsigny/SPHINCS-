@@ -25,6 +25,12 @@ contract SphincsC13ShaAsm {
     {
         assembly {
             let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
+            // N_MASK is applied only where a word's low 16 bytes could matter: R (H_msg
+            // hashes the full 0x40 word) and the final root compare. Every other n-byte
+            // value is either calldatacopy'd as exactly 16 bytes (sk, sibling, chain value)
+            // or written as a 32-byte word (a precompile output, a root / chain top moved
+            // into its T slot) whose low half is overwritten by the next write or lies past
+            // the SHA-256 input length, so it never reaches a preimage.
 
             if iszero(eq(sig.length, 3688)) {
                 mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
@@ -41,94 +47,99 @@ contract SphincsC13ShaAsm {
                 revert(0x00, 0x64)
             }
 
-            let seed := pkSeed
-            let root := pkRoot
             let sigBase := sig.offset
 
             // ── H_msg: one-shot SHA-256(seed ‖ root ‖ R ‖ msg ‖ domain) = 160 B ──
-            let R := and(calldataload(sigBase), N_MASK)
-            mstore(0x00, seed)
-            mstore(0x20, root)
-            mstore(0x40, R)
+            mstore(0x00, pkSeed)
+            mstore(0x20, pkRoot)
+            mstore(0x40, and(calldataload(sigBase), N_MASK))
             mstore(0x60, message)
             mstore(0x80, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF)
-            if iszero(staticcall(gas(), 0x02, 0x00, 0xA0, 0xA0, 0x20)) { revert(0, 0) }
+            pop(staticcall(gas(), 0x02, 0x00, 0xA0, 0xA0, 0x20))
+            // Precompile presence: on a chain where 0x02 is not a precompile the call to the
+            // empty account "succeeds" with no return data and leaves the output slot as it
+            // was. With in-place outputs every F/H/T would then be the identity, so this is
+            // checked here, before any output is read (a precompile is there for the whole
+            // call or not at all; this also catches a call-depth failure, which is likewise
+            // the same for every call of this frame), and again on the last call before the
+            // root compare. (review c12sha-precompile-presence)
+            if iszero(eq(returndatasize(), 0x20)) { revert(0, 0) }
             let dWord := mload(0xA0)
 
-            // MSB-first digest parsing (K=7, A=19, H=22; K*A=133):
+            // MSB-first digest parsing (FIPS base_2b order). Fields, from the MSB:
             //   FORS idx i (19 bit): (dWord >> (237 - 19i)) & 0x7FFFF   [237 = 256 - A]
             //   htIdx     (22 bit): (dWord >> 101) & 0x3FFFFF           [101 = 256 - K*A - H]
-            //   forced-zero idx K-1=6: (dWord >> 123) & 0x7FFFF         [123 = 256 - K*A]
+            //   forced-zero is FORS idx K-1=6: (dWord >> 123) & 0x7FFFF [123 = 256 - K*A]
             if and(shr(123, dWord), 0x7FFFF) { mstore(0x00, 0) return(0x00, 0x20) }
             let htIdx := and(shr(101, dWord), 0x3FFFFF)
             let idxLeaf0 := and(htIdx, 0x7FF)   // SUBTREE_H = 11
             let idxTree0 := shr(11, htIdx)
 
-            mstore(0x00, seed)
+            // F/H prefix at 0x00 and T prefix at 0x100: seed (top 16 B) + 48 zero bytes.
+            mstore(0x00, pkSeed)
             mstore(0x20, 0)
+            mstore(0x100, pkSeed)
+            mstore(0x120, 0)
 
-            let forsBase := or(shl(184, idxTree0), or(shl(176, 3), shl(144, idxLeaf0)))
+            // forsBase: type=3 @96, tree=idxTree0 @104, kp=idxLeaf0 @64.
+            let forsBase := or(shl(104, idxTree0), or(shl(96, 3), shl(64, idxLeaf0)))
+            // T_k ADRSc (FORS_ROOTS, type=4) — nothing else writes 0x136..0x156 before T_k.
+            mstore(0x136, or(shl(104, idxTree0), or(shl(96, 4), shl(64, idxLeaf0))))
 
             // ──────────────────────── FORS+C (K=7, A=19) ────────────────────────
+            // g = (t << A) | mdT is the FIPS tree_index at height 0; shifting it right
+            // once per level gives the parent tree_index, and its low bit is the
+            // L/R position of the node being hashed next.
+            let dd := dWord
+            let authPtr := add(sigBase, 128)   // AUTH_START = 16 + K*N; per-tree auth = A*N = 304
             for { let t := 0 } lt(t, 6) { t := add(t, 1) } {
-                let mdT := and(shr(sub(237, mul(19, t)), dWord), 0x7FFFF)
-                let sk := and(calldataload(add(sigBase, add(16, shl(4, t)))), N_MASK)
-                mstore(0x40, or(forsBase, shl(80, or(shl(19, t), mdT))))
-                mstore(0x56, sk)
-                if iszero(staticcall(gas(), 0x02, 0x00, 0x66, 0x80, 0x20)) { revert(0, 0) }
-                let node := and(mload(0x80), N_MASK)
-
-                let pathIdx := mdT
-                // AUTH_START = 16 + K*N = 128; per-tree auth = A*N = 304
-                let authPtr := add(sigBase, add(128, mul(t, 304)))
-                for { let hh := 0 } lt(hh, 19) { hh := add(hh, 1) } {
-                    let sibling := and(calldataload(add(authPtr, shl(4, hh))), N_MASK)
-                    let parentIdx := shr(1, pathIdx)
-                    // word2 = height = hh+1; word3 = (t << (A-1-hh)) | parentIdx
-                    mstore(0x40, or(forsBase, or(shl(112, add(hh, 1)), shl(80, or(shl(sub(18, hh), t), parentIdx)))))
-                    switch and(pathIdx, 1)
-                    case 0 { mstore(0x56, node)    mstore(0x66, sibling) }
-                    default { mstore(0x56, sibling) mstore(0x66, node) }
-                    if iszero(staticcall(gas(), 0x02, 0x00, 0x76, 0x80, 0x20)) { revert(0, 0) }
-                    node := and(mload(0x80), N_MASK)
-                    pathIdx := parentIdx
+                let g := or(shl(19, t), shr(237, dd))
+                dd := shl(19, dd)
+                // Leaf F: word3 = (t << A) | mdT (height 0); sk = sig[16 + 16t]
+                mstore(0x36, or(forsBase, g))
+                calldatacopy(0x56, add(sigBase, add(16, shl(4, t))), 0x10)
+                let out := add(0x56, shl(4, and(g, 1)))
+                pop(staticcall(gas(), 0x02, 0x00, 0x66, out, 0x20))
+                let lvl := forsBase
+                for { let end := add(authPtr, 304) } lt(authPtr, end) { authPtr := add(authPtr, 0x10) } {
+                    calldatacopy(xor(out, 0x30), authPtr, 0x10)   // sibling into the other half
+                    g := shr(1, g)
+                    lvl := add(lvl, 0x100000000)                   // word2 = height + 1
+                    mstore(0x36, or(lvl, g))                       // word3 = parent tree_index
+                    out := add(0x56, shl(4, and(g, 1)))
+                    pop(staticcall(gas(), 0x02, 0x00, 0x76, out, 0x20))
                 }
-                mstore(add(0x100, shl(5, t)), node)
+                mstore(add(0x156, shl(4, t)), mload(out))         // root t → T_k slot t
             }
 
-            // Forced-zero tree (t=K-1=6)
-            {
-                let lastSecret := and(calldataload(add(sigBase, add(16, shl(4, 6)))), N_MASK) // 16+6*16=112
-                mstore(0x40, or(forsBase, shl(80, shl(19, 6))))   // word3 = 6 << A
-                mstore(0x56, lastSecret)
-                if iszero(staticcall(gas(), 0x02, 0x00, 0x66, 0x80, 0x20)) { revert(0, 0) }
-                mstore(0x1C0, and(mload(0x80), N_MASK))   // 0x100 + 6*0x20
-            }
+            // Forced-zero tree (t=K-1=6): revealed root hashed under FORS_TREE leaf ADRS,
+            // output straight into T_k slot 6 (0x156 + 6*16).
+            mstore(0x36, or(forsBase, shl(19, 6)))   // word3 = 6 << A
+            calldatacopy(0x56, add(sigBase, 112), 0x10)   // 16 + 6*16
+            pop(staticcall(gas(), 0x02, 0x00, 0x66, 0x1B6, 0x20))
 
-            // T_k: compress K=7 roots. input = 16+48+22+7*16 = 198 = 0xC6
-            mstore(0x40, or(shl(184, idxTree0), or(shl(176, 4), shl(144, idxLeaf0))))
-            for { let t := 0 } lt(t, 7) { t := add(t, 1) } {
-                mstore(add(0x56, shl(4, t)), mload(add(0x100, shl(5, t))))
-            }
-            if iszero(staticcall(gas(), 0x02, 0x00, 0xC6, 0x80, 0x20)) { revert(0, 0) }
-            let currentNode := and(mload(0x80), N_MASK)
+            // T_k: compress K=7 roots. input = 16+48+22+7*16 = 198 = 0xC6.
+            // Output → 0x56, the payload slot of the layer-0 WOTS-message digest.
+            pop(staticcall(gas(), 0x02, 0x100, 0xC6, 0x56, 0x20))
 
             // ──────────────────── Hypertree (D=2, subtree_h=11) ────────────────────
             let idxTree := htIdx
-            let sigOff := 1952   // HT_START = 128 + (K-1)*A*N = 128 + 6*304
+            let wotsPtr := add(sigBase, 1952)   // HT_START = 128 + (K-1)*A*N = 128 + 6*304
 
             for { let layer := 0 } lt(layer, 2) { layer := add(layer, 1) } {
                 let idxLeaf := and(idxTree, 0x7FF)
                 idxTree := shr(11, idxTree)
-                let wotsBase := or(shl(248, layer), or(shl(184, idxTree), shl(144, idxLeaf)))
+                let layerTree := or(shl(168, layer), shl(104, idxTree))
+                // wotsBase: type=0, layer @168, tree=idxTree @104, kp=idxLeaf @64
+                let wotsBase := or(layerTree, shl(64, idxLeaf))
+                let countPtr := add(wotsPtr, 688)   // l*N = 43*16
 
-                let countOff := add(sigOff, 688)   // l*N = 43*16
-                let count := shr(224, calldataload(add(sigBase, countOff)))
-
-                mstore(0x40, wotsBase)
-                mstore(0x56, currentNode)
-                mstore(0x66, shl(224, count))
-                if iszero(staticcall(gas(), 0x02, 0x00, 0x6A, 0x80, 0x20)) { revert(0, 0) }
+                // WOTS-message digest d = SHA-256(seed‖zeros‖wotsBase‖currentNode‖count[4]).
+                // currentNode is already at 0x56; only the top 4 bytes of the 0x66 word
+                // (the count) fall inside the 0x6A-byte input.
+                mstore(0x36, wotsBase)
+                mstore(0x66, calldataload(countPtr))
+                pop(staticcall(gas(), 0x02, 0x00, 0x6A, 0x80, 0x20))
                 let d := mload(0x80)
 
                 // WOTS+C digit sum == 208 (43 base-8 digits, MSB-first: digit i @ (253-3i))
@@ -138,52 +149,62 @@ contract SphincsC13ShaAsm {
                 }
                 if iszero(eq(digitSum, 208)) { mstore(0x00, 0) return(0x00, 0x20) }
 
-                let wotsPtr := add(sigBase, sigOff)
+                // Complete 43 chains. chainBase carries word2 = chain i (word3 = 0); the
+                // hash step (word3, < 256) is its last byte 0x55, set with mstore8 and run
+                // from the digit (MSB-first cursor on d) up to 6. Each F output lands
+                // back in 0x56, the next step's input.
+                let chainBase := wotsBase
                 for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
-                    let digit := and(shr(sub(253, mul(3, i)), d), 0x7)
-                    let steps := sub(7, digit)
-                    let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
-                    let chainBase := or(wotsBase, shl(112, i))
-                    for { let step := 0 } lt(step, steps) { step := add(step, 1) } {
-                        mstore(0x40, or(chainBase, shl(80, add(digit, step))))
-                        mstore(0x56, val)
-                        if iszero(staticcall(gas(), 0x02, 0x00, 0x66, 0x80, 0x20)) { revert(0, 0) }
-                        val := and(mload(0x80), N_MASK)
+                    calldatacopy(0x56, add(wotsPtr, shl(4, i)), 0x10)
+                    mstore(0x36, chainBase)
+                    for { let hs := shr(253, d) } lt(hs, 7) { hs := add(hs, 1) } {
+                        mstore8(0x55, hs)
+                        pop(staticcall(gas(), 0x02, 0x00, 0x66, 0x56, 0x20))
                     }
-                    mstore(add(0x100, shl(5, i)), val)
+                    d := shl(3, d)
+                    mstore(add(0x156, shl(4, i)), mload(0x56))   // chain top → T_l slot i
+                    chainBase := add(chainBase, 0x100000000)    // word2 = chain + 1
                 }
 
-                // T_l: input = 16+48+22+43*16 = 774 = 0x306
-                mstore(0x40, or(shl(248, layer), or(shl(184, idxTree), or(shl(176, 1), shl(144, idxLeaf)))))
-                for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
-                    mstore(add(0x56, shl(4, i)), mload(add(0x100, shl(5, i))))
-                }
-                if iszero(staticcall(gas(), 0x02, 0x00, 0x306, 0x320, 0x20)) { revert(0, 0) }
-                let wotsPk := and(mload(0x320), N_MASK)
-
-                // Merkle climb (subtree_h = 11)
-                let authOff := add(countOff, 4)
-                let treeAdrs := or(shl(248, layer), or(shl(184, idxTree), shl(176, 2)))
-                let merkleNode := wotsPk
+                // T_l: WOTS_pk = compress 43 chain tops. input = 16+48+22+43*16 = 774 = 0x306.
+                // Output → the Merkle slot of leaf idxLeaf (0x56 if even, 0x66 if odd).
+                mstore(0x136, or(wotsBase, shl(96, 1)))
                 let mIdx := idxLeaf
-                let merklePtr := add(sigBase, authOff)
-                for { let hh := 0 } lt(hh, 11) { hh := add(hh, 1) } {
-                    let sibling := and(calldataload(add(merklePtr, shl(4, hh))), N_MASK)
-                    let parentIdx := shr(1, mIdx)
-                    mstore(0x40, or(treeAdrs, or(shl(112, add(hh, 1)), shl(80, parentIdx))))
-                    switch and(mIdx, 1)
-                    case 0 { mstore(0x56, merkleNode) mstore(0x66, sibling)    }
-                    default { mstore(0x56, sibling)    mstore(0x66, merkleNode) }
-                    if iszero(staticcall(gas(), 0x02, 0x00, 0x76, 0x80, 0x20)) { revert(0, 0) }
-                    merkleNode := and(mload(0x80), N_MASK)
-                    mIdx := parentIdx
-                }
+                let out := add(0x56, shl(4, and(mIdx, 1)))
+                pop(staticcall(gas(), 0x02, 0x100, 0x306, out, 0x20))
 
-                currentNode := merkleNode
-                sigOff := add(authOff, 176)   // subtree_h*N = 11*16
+                // Merkle climb (subtree_h = 11). TREE: type=2, layer @168, tree @104
+                let lvl := or(layerTree, shl(96, 2))
+                let p := add(countPtr, 4)
+                for { let end := add(p, 176) } lt(p, end) { p := add(p, 0x10) } {
+                    calldatacopy(xor(out, 0x30), p, 0x10)
+                    mIdx := shr(1, mIdx)
+                    lvl := add(lvl, 0x100000000)
+                    mstore(0x36, or(lvl, mIdx))
+                    out := add(0x56, shl(4, and(mIdx, 1)))
+                    pop(staticcall(gas(), 0x02, 0x00, 0x76, out, 0x20))
+                }
+                // mIdx is 0 after subtree_h shifts, so the subtree root sits at 0x56:
+                // the next layer's WOTS-digest payload, or the final root.
+                wotsPtr := p   // subtree_h*N = 11*16 after the auth path
             }
 
-            valid := eq(currentNode, root)
+            // Call-failure model. The SHA-256 calls are pop()ed, not guarded one by one,
+            // and a call that came back without writing would leave its input in place as
+            // its "output". Every way a 0x02 call can come back without 32 bytes ends the
+            // frame before this compare:
+            //  - 0x02 absent (empty account: success, no data) or the call-depth limit hit
+            //    (failure, no data, no gas burnt): the same for every call of this frame, so
+            //    the returndatasize check after the first call reverts before any output is
+            //    read, and this check covers the call that produced the compared root.
+            //  - out of gas: the call gets all but 1/64 of the gas left (EIP-150) and burns
+            //    it, so a failing call of cost P leaves this frame at most P/63 gas; P is at
+            //    most 360 (the 774-B T_l), so at most 5 gas: too little to reach another
+            //    call or this check, and the frame halts.
+            // On a chain where 0x02 can fail without burning the forwarded gas, restore the
+            // per-call `if iszero(staticcall(..)) { revert(0, 0) }` guards.
+            if iszero(eq(returndatasize(), 0x20)) { revert(0, 0) }
+            valid := eq(and(mload(0x56), N_MASK), pkRoot)
             mstore(0x00, valid)
             return(0x00, 0x20)
         }

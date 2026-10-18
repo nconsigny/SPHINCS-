@@ -5,6 +5,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import "../src/sha/SPHINCs-C12-SHA.sol";
+import "./helpers/OogSweep.sol";
 
 /// @dev End-to-end FFI test for C12-SHA: full FIPS 205 SLH-DSA-SHA2 at C12 params
 ///      (n=16 h=20 d=5 a=7 k=20 w=8). MGF1 H_msg + 0x00 0x00 envelope, MSB-first
@@ -66,5 +67,16 @@ contract SphincsC12ShaTest is Test {
         bytes memory bad = new bytes(6496);
         vm.expectRevert(bytes("Invalid sig length"));
         verifier.verify(cachedSeed, cachedRoot, MSG, bad);
+    }
+
+    /// @dev Pop()ed, in-place 0x02 calls: at no gas limit may a valid signature come back
+    ///      `false` (see test/helpers/OogSweep.sol). Sweeps the last 3,000 gas below the
+    ///      smallest limit that verifies, one gas at a time.
+    function testC12ShaOutOfGasNeverReturnsFalse() public view {
+        bytes memory data = abi.encodeWithSelector(verifier.verify.selector, cachedSeed, cachedRoot, MSG, cachedSig);
+        (uint256 minGas, uint256 nFalse, uint256 nTrue) = OogSweep.run(address(verifier), data, 2_000_000, 3000);
+        assertGt(minGas, 3000);
+        assertEq(nTrue, 32, "every limit at or above the minimum must verify");
+        assertEq(nFalse, 0, "a valid sig came back false at a tight gas limit");
     }
 }

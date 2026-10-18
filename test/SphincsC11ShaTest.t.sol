@@ -5,6 +5,7 @@ pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
 import "../src/sha/SPHINCs-C11-SHA.sol";
+import "./helpers/OogSweep.sol";
 
 /// @dev End-to-end FFI test for the SHA-256 / 22-byte-ADRSc "minimal twin" of C11.
 ///      Vectors from script/signer.py c11-sha (hash=sha2, adrs_mode=adrsc, parse=msb).
@@ -63,5 +64,16 @@ contract SphincsC11ShaTest is Test {
     function testC11ShaRejectsWrongRoot() public view {
         bytes32 wrongRoot = bytes32(uint256(cachedRoot) ^ (1 << 200));
         assertFalse(_verifySilent(cachedSeed, wrongRoot, MSG, cachedSig), "wrong root must not verify");
+    }
+
+    /// @dev Pop()ed, in-place 0x02 calls: at no gas limit may a valid signature come back
+    ///      `false` (see test/helpers/OogSweep.sol). Sweeps the last 3,000 gas below the
+    ///      smallest limit that verifies, one gas at a time.
+    function testC11ShaOutOfGasNeverReturnsFalse() public view {
+        bytes memory data = abi.encodeWithSelector(verifier.verify.selector, cachedSeed, cachedRoot, MSG, cachedSig);
+        (uint256 minGas, uint256 nFalse, uint256 nTrue) = OogSweep.run(address(verifier), data, 1_000_000, 3000);
+        assertGt(minGas, 3000);
+        assertEq(nTrue, 32, "every limit at or above the minimum must verify");
+        assertEq(nFalse, 0, "a valid sig came back false at a tight gas limit");
     }
 }
