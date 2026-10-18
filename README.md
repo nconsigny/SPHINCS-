@@ -220,17 +220,19 @@ EntryPoint v0.9: `0x433709009B8330FDa32311DF1C2AFA402eD8D009` (Sepolia)
 
 ### 2026-06-04 redeploy: new accounts & factories
 
-New C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each account funded 0.1 ETH):
+Hardened C13 verifiers (commit 16732a7), new C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each account funded 0.1 ETH):
 
 | Chain | Contract | Address |
 |---|---|---|
+| Sepolia | C13 verifier (hardened) | [`0xc6f400...`](https://sepolia.etherscan.io/address/0xc6f4009D4a8220527b849670431Cbde5FeD8A5F2) |
 | Sepolia | SphincsAccountFactory | [`0x8830d3...`](https://sepolia.etherscan.io/address/0x8830d36284829656F2A60CD028062686069FABA4) |
 | Sepolia | SphincsAccountFactory (fresh) | [`0x79FDD0...`](https://sepolia.etherscan.io/address/0x79FDD0aFcb2214D6C17E639dA7eF6357956Cd857) |
 | Sepolia | SphincsAccount (ERC-4337 hybrid, C13) | [`0x012801...`](https://sepolia.etherscan.io/address/0x01280171F336869e9c96F9e6eb674b1548D10dD4) |
+| ethrex | C13 verifier (hardened) | [`0xAA481E...`](https://explorer.eip-8141.ethrex.xyz/address/0xAA481E835ec1b82E528d6D36D432F9Af440B4295) |
 | ethrex | SphincsAccountFactory | [`0x874f5b...`](https://explorer.eip-8141.ethrex.xyz/address/0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7) |
 | ethrex | Frame account (EIP-8141, C13) | [`0x253A4d...`](https://explorer.eip-8141.ethrex.xyz/address/0x253A4d0100fe7A2a6d6839b37BDC283FD1dF693d) |
 
-> ethrex's `SphincsAccountFactory` is deployed for completeness, but EntryPoint v0.9 has no code on ethrex, so accounts created there are inert for ERC-4337. ethrex's functional PQ path is the EIP-8141 frame account. Full address record: [`script/.c13_addresses.json`](./script/.c13_addresses.json).
+> ethrex's `SphincsAccountFactory` is deployed for completeness, but EntryPoint v0.9 has no code on ethrex, so accounts created there are inert for ERC-4337. ethrex's functional PQ path is the EIP-8141 frame account. The full address record is kept locally in the gitignored `script/.c13_addresses.json` (read by `script/send_userop_c13.py` and `script/send_frame_tx_c13.py`).
 
 ### Sepolia (ERC-4337 Hybrid, C-series)
 
@@ -240,7 +242,7 @@ New C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each ac
 | C11 | [`0xC25ef5...`](https://sepolia.etherscan.io/address/0xC25ef566884DC36649c3618EEDF66d715427Fd74) | [`0x3C3b0c...`](https://sepolia.etherscan.io/address/0x3C3b0c3498E5ed9350F6fBFA0Ef8dC55f524eA50) | 308 K | [`0x9fba169c...`](https://sepolia.etherscan.io/tx/0x9fba169ca76b6712586e44e1a4a2d0407b8b8b9ce767272a193e41a756260b74) |
 | **C13** | [`0xce176d...`](https://sepolia.etherscan.io/address/0xce176df2680f6612a61486f74502db62d014d23d) | [`0xcef985...`](https://sepolia.etherscan.io/address/0xcef985d4db485e96ab9187ad462561bff241db0d) (factory [`0xcaf5d2...`](https://sepolia.etherscan.io/address/0xcaf5d2582eb405e3c4b65f3a52d147badfd96fed)) | 293 K | [`0xbbf06456...`](https://sepolia.etherscan.io/tx/0xbbf06456145a4daea1b5006f1f5d7b214c62c1c2877eabb61ae4b26e453189d0) |
 
-> **C13 on Sepolia uses the FIPS 205 §4.2 uncompressed 32-byte ADRS** (keccak256 hash). First verifier in the repo on the FIPS address layout. Standalone verify tx-level gas: **188,278**. Full hybrid-4337 `handleOps` UserOp gas: **292,727** (ECDSA recovery + C13 verify + 0.00001 ETH self-transfer through `SphincsAccount.execute`). See [`script/.c13_addresses.json`](./script/.c13_addresses.json) for the canonical address record.
+> **C13 on Sepolia uses the FIPS 205 §4.2 uncompressed 32-byte ADRS** (keccak256 hash). First verifier in the repo on the FIPS address layout. Standalone verify tx-level gas: **188,278**. Full hybrid-4337 `handleOps` UserOp gas: **292,727** (ECDSA recovery + C13 verify + 0.00001 ETH self-transfer through `SphincsAccount.execute`). The verifier, factory, account and tx in this row predate the 2026-06-04 hardening redeploy; the current verifier is in the table above, and the canonical address record is the gitignored local `script/.c13_addresses.json`.
 
 ### Sepolia (SLH-DSA-128-24 standalone verifiers, no account wired yet)
 

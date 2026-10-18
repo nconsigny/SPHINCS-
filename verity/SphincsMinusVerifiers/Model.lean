@@ -2,8 +2,8 @@
   Verity compilation models for the production verifier contracts reviewed in
   nconsigny/SPHINCS-:
 
-  * src/SPHINCs-C13Asm.sol
-  * src/SLH-DSA-SHA2-128-24verifier.sol
+  * src/keccak/SPHINCs-C13Asm.sol
+  * src/sha/SLH-DSA-SHA2-128-24verifier.sol
 
   These models intentionally mirror the handwritten assembly structure.  They
   use Verity's ABI-aware `Bytes` parameter locals:

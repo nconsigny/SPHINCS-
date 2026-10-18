@@ -1,5 +1,7 @@
 # Agent-Assisted Security Review — SPHINCs- C13 & SLH-DSA-SHA2-128-24
 
+> **Snapshot:** this review describes the tree at [`1d3abd3`](https://github.com/nconsigny/SPHINCs-/tree/1d3abd3) (2026-06-03), just before its remediations (6f5eabe, 16732a7, 0212ab4). Paths and line numbers refer to that commit. Since then `src/` has been split by hash: `src/SPHINCs-C13Asm.sol` → `src/keccak/`, `src/SLH-DSA-SHA2-128-24*.sol` → `src/sha/`, `src/SLH-DSA-keccak-128-24verifier.sol` → `legacy/src/`. (`signers/signer-wasm/` paths were already updated in 7cb0c55.) Statements such as "no `.github/workflows`" are historical. Fixes carry `(review <ID>)` tags in source; see [SECURITY-ANALYSIS.md](SECURITY-ANALYSIS.md).
+
 > **What this is (and is not):** this review was produced with AI-agent assistance
 > (automated source reading plus adversarial verification passes), driven and checked
 > by the maintainer. It is **not an independent professional security audit** and

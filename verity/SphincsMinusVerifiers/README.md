@@ -2,8 +2,8 @@
 
 This folder is the Verity workbench for two modeled production verifiers:
 
-- `SphincsC13Asm_VerityModel` models `src/SPHINCs-C13Asm.sol`.
-- `SLH_DSA_SHA2_128_24_VerityModel` models `src/SLH-DSA-SHA2-128-24verifier.sol`.
+- `SphincsC13Asm_VerityModel` models `src/keccak/SPHINCs-C13Asm.sol`.
+- `SLH_DSA_SHA2_128_24_VerityModel` models `src/sha/SLH-DSA-SHA2-128-24verifier.sol`.
 
 Live Solidity also includes `SPHINCs-C7Asm.sol` and `SPHINCs-C9Asm.sol`; those are not modeled in this tree. Legacy verifier models and older kernel experiments have been removed from this workbench.
 

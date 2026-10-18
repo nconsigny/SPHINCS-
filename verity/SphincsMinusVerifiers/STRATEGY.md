@@ -2,8 +2,8 @@
 
 The active strategy is to keep the Verity model tree aligned with the live production verifier set while modeling only the two verifier families currently in scope:
 
-- C13 keccak, modeled from `src/SPHINCs-C13Asm.sol`.
-- SLH-DSA-SHA2-128-24, modeled from `src/SLH-DSA-SHA2-128-24verifier.sol`.
+- C13 keccak, modeled from `src/keccak/SPHINCs-C13Asm.sol`.
+- SLH-DSA-SHA2-128-24, modeled from `src/sha/SLH-DSA-SHA2-128-24verifier.sol`.
 
 C7 and C9 are live Solidity contracts but are not modeled here. Legacy verifier and kernel work have been removed.
 

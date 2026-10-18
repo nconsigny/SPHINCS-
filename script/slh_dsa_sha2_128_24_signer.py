@@ -4,7 +4,7 @@ SLH-DSA-SHA2-128-24 signer — bit-exact NIST FIPS 205 / SP 800-230 compliance.
 
 Implements the SLH-DSA-SHA2-128-24 parameter set exactly as NIST specifies it
 (so a signature produced here validates against any conforming verifier,
-including our on-chain src/SLH-DSA-SHA2-128-24verifier.sol which uses the
+including our on-chain src/sha/SLH-DSA-SHA2-128-24verifier.sol which uses the
 SHA-256 precompile).
 
 Parameters (FIPS 205 §11, SP 800-230 Table 1):
