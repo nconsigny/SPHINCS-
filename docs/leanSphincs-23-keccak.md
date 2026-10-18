@@ -171,7 +171,8 @@ root: the kept subtree's root, folded up through the surrogates (bit (ℓ−b) o
 A full key is `b = 25`, which costs about 7.6·10⁹ keccak calls to generate: `2^25 · 226`, that is 225 per WOTS
 leaf (32 secret pairs, 192 chain steps, the leaf) plus one per tree node. (sphincs-art's 8.1·10⁹ for the same key
 counts BLAKE2s compressions: the 1056-byte leaf input alone takes 17.) A pruned key keeps a subtree of 2^b leaves,
-and the verifier cannot tell the two apart. Tests use small `b`.
+and the verifier cannot tell the two apart. Tests use small `b`. §14 generates a key once and signs from a key file
+with a bounded node cache.
 
 ## 10. Signing (message `m`, 32 bytes)
 
@@ -214,4 +215,169 @@ function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata 
 
 `signers/leansphincs23-keccak` (Rust, port of the upstream crate) and `script/leansphincs23_signer.py`
 (independent Python) both print `0x` + hex of `abi.encode(bytes32 pkSeed, bytes32 pkRoot, bytes sig)`,
-with the high-aligned key words above, which is what the Forge tests decode.
+with the high-aligned key words above, which is what the Forge tests decode. `ls23k sign-key` (§14) prints the
+same bytes from a key file.
+
+## 14. Tiered signers
+
+A tiered signer generates the key once, for a kept subtree of height `b` (§9), and stores the key with a node cache of
+bounded size. Each signature then recomputes only the auth-path nodes that the cache does not hold. The tiers are the
+"One signer, leanSphincs-23" table of the [sphincs-art fork](https://nconsigny.github.io/sphincs-art/), in the page's
+vanilla variant (its default view, FORS with no root hash; the figures below are that view's). There is one parameter
+set, and the tiers differ only in how much of the tree the signer builds and keeps.
+
+A tiered signature is **byte-identical** to the stateless `sign(key_gen(S, b), m)` of §9–§10. The two signers use the
+same `P`, the same subtree position `s`, the same root, the same `ρ` (`R_0 + i`, the least `i` that lands in the kept
+subtree), the same WOTS+C counter and the same FORS openings. Only the source of the auth-path nodes changes. The
+verifier, the encoding and every existing KAT and fixture stay as they are, and no one can tell which signer produced a
+signature.
+
+| Tier | Device class (the page's) | `b` | Cache | Cache plan | Cached nodes |
+|---|---|---:|---:|---|---:|
+| Light | Ledger Nano S+ | 13 | 16 KiB | level 3 only | 1,024 |
+| Standard | weak CPU | 20 | 1 MiB | levels 5..20 | 65,535 |
+| Full | powerful CPU | 25 (whole tree) | 16 MiB | levels 6..25 | 1,048,575 |
+
+The device classes are the page's, sized from its BLAKE2s figures. Light's 16 KiB cache is the page's budget for a
+Ledger Nano S+ class device, but a keccak256 call costs more than a BLAKE2s compression on such a device, so the page's
+times are optimistic here. Neither the model nor the reference signer measures device times.
+`signers/leansphincs23-keccak` is a host-side reference signer, not a device implementation. A custom `(b, cache_bytes)`
+picks its plan by the rule under "Cache plans" below.
+
+### CLI
+
+`signers/leansphincs23-keccak` implements the tiers (`ls23k`, see its README):
+
+```sh
+ls23k keygen --seed-file seed.hex --tier light -o key.ls23k   # or --seed-stdin; --tier standard|full, or --b N --cache-bytes N
+                                                              # [--force] [--threads N]; prints 0x || abi.encode(pkSeed, pkRoot)
+ls23k sign-key key.ls23k <msg_hex64>                          # 0x || abi.encode(pkSeed, pkRoot, sig): the bytes `ls23k sign` prints
+ls23k info key.ls23k                                          # JSON: tier, b, s, plan, cache, key words, costs; no secret
+```
+
+`keygen` reads the seed from a file that group and others cannot access, or from standard input, never from the
+command line (where other local users and the shell history see it). It checks the output path before the keygen, and
+writes the key file (mode 0600) through a temporary file beside it, so nothing partial is ever at the key file's path.
+Without `--force` it never replaces an existing file. `sign-key` verifies each signature under the key file's public
+key before printing it.
+
+### Cache plans
+
+The auth path of leaf `idx` is the `b` siblings inside the kept subtree (levels `0..b−1`), followed by the `25 − b`
+surrogates (levels `b..24`). The surrogates are stored with the key, or re-derived at one call each, and do not count
+toward the cache. A cache of `cache_bytes` holds `⌊cache_bytes / 16⌋` nodes. A plan keeps one of the following:
+
+| Plan | Cached | Keccak calls per signature |
+|---|---|---|
+| whole | every node of the subtree, `2^(b+1) − 1` | 0 |
+| top `c` | levels `c..b`, `2^(b−c+1) − 1` nodes | `2^c·225 + (2^c − 1)` |
+| level `c` | level `c` only, `2^(b−c)` nodes | `2^c·225 + (2^c − 1) + (2^(b−c) − 1)` |
+| none | nothing | `2^b·225 + (2^b − 1)` |
+
+`1 ≤ c ≤ b`. The term `2^c·225 + (2^c − 1)` rebuilds the `2^c`-leaf block that holds `idx`, which gives the siblings
+below level `c`. A WOTS leaf costs 225 calls (32 secret pairs, 192 chain steps, the leaf hash). A "level" plan also
+rehashes the cached nodes up to the subtree root to get the siblings above level `c`. The signer uses the cheapest
+plan that fits. On equal cost it takes the plan with fewer cached nodes, then prefers "top" over "level". The only
+ties are between "none", "top `b`" and "level `b`", which all do the same work, and the rule picks "none". The keygen
+pass computes every node of the subtree anyway, so filling the cache adds nothing to keygen.
+
+- **Light** (1,024 nodes): the whole subtree is 16,383 nodes. Levels 4..13 fit and cost `16·225 + 15 = 3,615` per
+  signature. Level 3 alone costs `8·225 + 7 + 1,023 = 2,830`, which is less.
+- **Standard** (65,536 nodes): levels 5..20 are 65,535 nodes. Each signature rebuilds a 32-leaf block, `32·225 + 31 =
+  7,231` calls.
+- **Full** (1,048,576 nodes): levels 6..25 are 1,048,575 nodes. Each signature rebuilds a 64-leaf block, `64·225 + 63 =
+  14,463` calls. Caching the whole tree would take `2^26 − 1` nodes (1 GiB) and make the auth path free.
+
+### Cost
+
+Keygen costs `2^b·226 + 2·(25 − b)` keccak256 calls: `P`, 225 calls per WOTS leaf, the `2^b − 1` nodes of the kept
+subtree, then the surrogates derived and folded. (The page's model counts `2^b` nodes, one call more.) Signing costs
+on average, in the page's model,
+`R_0 (1) + digest (1) + 2^(25−b) randomizer tries + FORS 133,095 + WOTS+C 14,830.4 + auth path`, with no randomizer
+tries for `b = 25`. The FORS term is `13·(2,048 + 4,096 + 4,094) + 1`. The WOTS+C term is 14,670.4 mean encoding
+tries plus 32 secret pairs and 128 chain steps. Both grinds are geometric, so the cost of a single signature varies
+around this mean.
+
+| | Light | Standard | Full |
+|---|---:|---:|---:|
+| Keygen (once), keccak256 calls, the signer | 1,851,416 (1.85M) | 236,978,186 (237M) | 7,583,301,632 (7.58B) |
+| Keygen, keccak256 calls, the page's model | 1,851,417 | 236,978,187 | 7,583,301,633 |
+| Keygen, BLAKE2s compressions (page) | 1.98M | 254M | 8.12B |
+| Sign, mean, keccak256 calls, the page's model | 154,853 | 155,190 | 162,390 |
+| … randomizer grind | 4,096 | 32 | 0 |
+| … auth path | 2,830 | 7,231 | 14,463 |
+| Sign, mean, keccak256 calls, the reference signer | 154,866 | 155,203 | 162,404 |
+| `sign-key`: verification of the signature | 249 | 249 | 249 |
+| `sign-key`: loading and checking the key file, per run | 1,048 | 32,778 | 524,288 |
+| Sign, BLAKE2s compressions (page) | 155K | 156K | 163K |
+| Page's time, keygen / sign | 60 s / 4.7 s | 2.0 s / 1.2 ms | 8.1 s / 0.16 ms |
+| Verify, keccak256 calls | 249 | 249 | 249 |
+
+The page's times are BLAKE2s compressions at its device rates (33K, 128M and 1G per second). They do not transfer to
+keccak256, because the devices' keccak throughput is different. The two counts differ only where an input is longer
+than one BLAKE2s block. A keccak256 call is one call however long its input is, while BLAKE2s pays one compression
+per 64-byte block: 17 for the WOTS leaf hash, 7 for the FORS key, 2 each for `R_0` and the digest.
+
+`signers/leansphincs23-keccak/tier_model.py` transcribes the page's cost model (sphincs-art
+`scripts/sweep_leansphincs_pruned.py` at `1ca729f`: `tree_cost`, `fors_sign`, `tier_costs`, `cover_lifetime`) in
+keccak256 calls. It prints the model's rows above, a custom column with `--b N --cache-bytes N`, the BLAKE2s figures
+with `--units blake2s`, and JSON with `--json`. `--check` asserts the model's figures in this section and the page's.
+The model keeps three of the script's counting conventions, each one call or one cached node over a minimal signer: it
+counts the digest on top of the grind, although the grind's last try is the digest; it counts `2^b` subtree nodes
+where there are `2^b − 1`; and its "top" plan caches, and its "level" plan rehashes, the subtree root, which no auth
+path uses.
+
+The reference signer is measured against the model as follows (exact counts, from its tests and benchmarks):
+
+- keygen is one call under the model (`2^b − 1` nodes);
+- the auth path equals the model's per-plan cost exactly: with a "level" plan, the rehash up to the subtree root is the
+  signer's check of the cache;
+- a signature costs the model's mean plus 13 calls for `b < 25`, because the 13 opened FORS secrets are derived a
+  second time, and plus 14 at `b = 25`, where it also makes one grind try and recomputes the digest after it (the model
+  counts no grind there);
+- `sign-key` also spends 249 calls verifying each signature under the key file's public key, and each run loads and
+  checks the key file (every cached node above the lowest cached level, `P` and the surrogates). The model counts
+  neither.
+
+### Lifetime
+
+| | Light | Standard | Full |
+|---|---:|---:|---:|
+| Rated (the page's target) | 20,000 | 2^21 (2.1M) | 2^23 (8.4M) |
+| Cover estimate at 127 bits | 40,274 (40.2K, ×2.01) | 2,781,217 (2.78M, ×1.33) | 54,085,110 (54.0M, ×6.45) |
+
+The estimate is the cover bound of the leanSPHINCS note (§3). It gives the largest `N` with
+`2^127 · 2^(b−25) · E_{r ~ Poisson(N/2^b)}[(1 − (1 − 2^−12)^r)^13] ≤ 1`. It is an estimate and is not proved. For the
+original leanSphincs parameters, the Lean-proved lifetimes are 4–17% below this estimate, and the gap is widest at
+small `b`. The page therefore rates each tier at a target that the estimate clears by at least 25%, and it rounds the
+estimates down. The estimate depends only on `(h, b, a, k)`, so it is the same for keccak256 as for BLAKE2s. The
+lifetime is a count of signatures under one key, whichever signer made them. Nothing enforces it: not the signature,
+not the verifier, and not the signer or the key file, which keep no count of signatures.
+
+### Operational rules
+
+- **One seed is one key.** Never use a seed with two different `b`: two tiers, a tier and a custom `b`, or the plain
+  `ls23k sign` at another `b`. `P`, the WOTS and FORS keys and the real tree nodes depend on `S` and the leaf index
+  only, not on `b` (§6–§9). Where two same-seed keys' kept subtrees overlap, a signature of one key is turned into a
+  valid signature of the other by replacing its auth path above the smaller subtree with the other key's nodes there.
+  Those are public: the other key's surrogates, or the path of any of its signatures whose leaf falls in the shared
+  subtree. No secret is needed. A full key's tree contains every subtree, so the overlap is certain against a full key;
+  a Light and a Standard key from one seed overlap for 1 seed in 32. The stronger key then falls to the weaker one's
+  lifetime, and the usage of the two keys adds up. Use a fresh, independent seed for every key. The plain `ls23k sign`
+  at the same `b` is the same key, and its signatures are identical to the tiered signer's.
+- **The key file holds the secret seed.** Anyone with the file can sign. It is created with mode 0600; back it up like
+  a private key. Everything else in the file (`P`, `s`, the root, the surrogates, the cache) is derived from `S` and
+  `b`, and the seed and `b` alone rebuild the key, at the keygen cost above. The cached nodes are not secret: they are
+  hashes of WOTS public keys, and auth paths reveal them as the key is used. The cache needs integrity, not secrecy.
+- **What a key file proves.** Loading checks that `P`, `s` and the surrogates are the seed's, and that the cache, the
+  kept subtree's root and the root are consistent with one another. It cannot check that the root is the seed's
+  without a keygen. A file whose cache was edited consistently and re-checksummed loads and reports its own root; the
+  checksum covers `S`, so only a holder of the seed can make one. A corrupt key file is refused when it is loaded, a
+  cache corrupted in memory afterwards is refused where signing recomputes over it, and `sign-key` verifies every
+  signature under the key file's public key before printing it. So a printed signature always verifies under the key
+  words printed with it: compare those with the registered key. (A signature from a bad auth path would reveal
+  nothing beyond the correct signature of the same message.)
+- **Signing is deterministic.** The same message gives the same signature, which reveals nothing new. Each distinct
+  message counts against the lifetime.
+- **The verifier is unchanged.** Tiered signatures are the stateless signer's signatures, so
+  `src/keccak/LeanSphincs-23Asm.sol`, the 249-call verification and the KAT fixture apply as they are.

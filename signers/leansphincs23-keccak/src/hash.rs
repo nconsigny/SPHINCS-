@@ -123,10 +123,20 @@ pub fn th_full(pp: &PublicParam, tw: &Tweak, payload: &[u8]) -> [u8; 32] {
     finish(hasher)
 }
 
+/// The number of cores, which [`par_map`] uses.
+pub fn available_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, usize::from)
+}
+
 /// `(0..n).map(f)` on every core, in order. The keccak256 calls of the worker threads are added to this
 /// thread's count, so [`keccak_calls`] still sees the whole computation.
 pub fn par_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
-    let threads = std::thread::available_parallelism().map_or(1, usize::from).clamp(1, n.max(1));
+    par_map_on(available_threads(), n, f)
+}
+
+/// [`par_map`] on at most `threads` threads: contiguous runs of `n / threads` indices each.
+pub fn par_map_on<T: Send>(threads: usize, n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+    let threads = threads.clamp(1, n.max(1));
     let chunk = n.div_ceil(threads).max(1);
     let f = &f;
     let (parts, calls): (Vec<Vec<T>>, Vec<u64>) = std::thread::scope(|scope| {

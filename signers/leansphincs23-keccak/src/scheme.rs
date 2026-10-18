@@ -154,17 +154,17 @@ impl XmssTree {
                 .collect();
             levels.push(up);
         }
-        let root = surrogates.iter().enumerate().fold(levels[b][0], |node, (t, sibling)| {
-            let level = b + t;
-            let j = s >> t;
-            let (left, right) = if j & 1 == 0 { (node, *sibling) } else { (*sibling, node) };
-            xmss_node(pp, level + 1, j >> 1, &left, &right)
-        });
+        let root = fold_surrogates(pp, b, s, levels[b][0], &surrogates);
         Self { b, s, levels, surrogates, root }
     }
 
     pub fn contains(&self, idx: u64) -> bool {
         idx >> self.b == self.s
+    }
+
+    /// Level `level` of the kept subtree (`0..=b`), its `2^(b - level)` nodes from the left.
+    pub fn level(&self, level: usize) -> &[Digest] {
+        &self.levels[level]
     }
 
     /// The authentication path of leaf `idx`, which must be kept.
@@ -175,6 +175,18 @@ impl XmssTree {
             if level < self.b { self.levels[level][(local >> level) ^ 1] } else { self.surrogates[level - self.b] }
         })
     }
+}
+
+/// The XMSS root of a key keeping subtree `s` of height `b`: the kept subtree's root `top`, folded up through the
+/// surrogates (bit `level - b` of `s` picks the side).
+pub fn fold_surrogates(pp: &PublicParam, b: usize, s: u64, top: Digest, surrogates: &[Digest]) -> Digest {
+    debug_assert_eq!(surrogates.len(), H - b);
+    surrogates.iter().enumerate().fold(top, |node, (t, sibling)| {
+        let level = b + t;
+        let j = s >> t;
+        let (left, right) = if j & 1 == 0 { (node, *sibling) } else { (*sibling, node) };
+        xmss_node(pp, level + 1, j >> 1, &left, &right)
+    })
 }
 
 /// `Tree.fold`: the root a leaf and its path reach.
@@ -199,19 +211,33 @@ impl SecretKey {
     }
 }
 
+/// `P = Th(0^16, address(PARAMETER), S)`: the public parameter of a seed.
+pub fn derive_public_param(seed: &MasterSecret) -> PublicParam {
+    th(&[0; PUBLIC_PARAM_LEN], &tweak(TWEAK_PARAMETER, 0, 0), seed)
+}
+
+/// `s`, the kept subtree of height `b`: the low `h - b` bits of `P` (`0` for a full key).
+pub fn subtree_position(pp: &PublicParam, b: usize) -> u64 {
+    assert!(b <= H);
+    if b == H { 0 } else { u64::from_le_bytes(pp[..8].try_into().unwrap()) & ((1 << (H - b)) - 1) }
+}
+
+/// The `h - b` surrogate siblings of a key keeping a subtree of height `b`, levels `b..h`, from the seed.
+pub fn derive_surrogates(pp: &PublicParam, seed: &MasterSecret, b: usize) -> Vec<Digest> {
+    (b..H).map(|level| th(pp, &tweak(TWEAK_SURROGATE, level as u32, 0), seed)).collect()
+}
+
 /// `Gen` for a key keeping a subtree of height `b` (`b = h` for a full key).
 ///
 /// The public parameter is derived from the seed, its low bits place the kept subtree, and the
-/// surrogates are derived from the seed. The `2^b` one-time leaves are computed on every core.
+/// surrogates are derived from the seed. The `2^b` one-time leaves are computed on every core, and every level of the
+/// kept subtree stays in memory (`tiers` has the streaming keygen of a key with a bounded node cache).
 pub fn key_gen(seed: &MasterSecret, b: usize) -> (SecretKey, PublicKey) {
     assert!(b <= H);
-    let public_param = th(&[0; PUBLIC_PARAM_LEN], &tweak(TWEAK_PARAMETER, 0, 0), seed);
-    let s = if b == H { 0 } else { u64::from_le_bytes(public_param[..8].try_into().unwrap()) & ((1 << (H - b)) - 1) };
-    let leaves = par_map(1 << b, |j| {
-        let e = ((s << b) + j as u64) as u32;
-        wots_leaf_hash(&public_param, e, &wots_ends(&public_param, seed, e))
-    });
-    let surrogates = (b..H).map(|level| th(&public_param, &tweak(TWEAK_SURROGATE, level as u32, 0), seed)).collect();
+    let public_param = derive_public_param(seed);
+    let s = subtree_position(&public_param, b);
+    let leaves = par_map(1 << b, |j| wots_leaf(&public_param, seed, ((s << b) + j as u64) as u32));
+    let surrogates = derive_surrogates(&public_param, seed, b);
     let tree = XmssTree::from_leaves(&public_param, b, s, leaves, surrogates);
     let sk = SecretKey { public_param, master: *seed, tree };
     let pk = sk.public_key();
@@ -235,22 +261,38 @@ pub fn randomizer(base: &Randomizer, i: u32) -> Randomizer {
 /// `Sign`: take the least `i` whose randomizer `R_0 + i` lands in the kept subtree (`i = 0` for a
 /// full key), open FORS, sign its key with WOTS+C.
 pub fn sign(sk: &SecretKey, m: &Message) -> Signature {
-    let pp = &sk.public_param;
+    let tree = &sk.tree;
+    let path = |idx| Ok::<_, std::convert::Infallible>(tree.path(idx));
+    match sign_with(&sk.public_param, &sk.master, m, |idx| tree.contains(idx), path) {
+        Ok(sig) => sig,
+        Err(never) => match never {},
+    }
+}
+
+/// `Sign`, with the authentication path of the leaf left to `path`. Everything else depends only on `P`, the master
+/// secret and which leaves are kept (`contains`), so [`sign`] (the path from the in-memory tree) and
+/// [`sign_with_cache`] (the path from a node cache) give the same bytes. The path is asked for right after the grind:
+/// an `Err` (a cache that does not check out) costs no FORS or WOTS work.
+pub fn sign_with<E>(
+    pp: &PublicParam,
+    master: &MasterSecret,
+    m: &Message,
+    contains: impl Fn(u64) -> bool,
+    path: impl FnOnce(u64) -> Result<[Digest; H], E>,
+) -> Result<Signature, E> {
     // The randomizers are `R_0 + i`, and the 80-byte digest input is one keccak permutation: an attempt
     // costs one call.
-    let base = randomizer_base(pp, &sk.master, m);
-    let rho = (0u32..)
-        .map(|i| randomizer(&base, i))
-        .find(|rho| sk.tree.contains(digest_index(pp, rho, m)))
-        .unwrap();
+    let base = randomizer_base(pp, master, m);
+    let rho = (0u32..).map(|i| randomizer(&base, i)).find(|rho| contains(digest_index(pp, rho, m))).unwrap();
     let (idx, u) = message_digest(pp, &rho, m);
-    let forest = ForsForest::from_leaves(pp, idx, &fors_leaves(pp, &sk.master, idx));
+    let path = path(idx)?;
+    let forest = ForsForest::from_leaves(pp, idx, &fors_leaves(pp, master, idx));
     let fors = ForsOpening {
-        secrets: std::array::from_fn(|kappa| fors_secret(pp, &sk.master, idx, kappa, u[kappa] as usize)),
+        secrets: std::array::from_fn(|kappa| fors_secret(pp, master, idx, kappa, u[kappa] as usize)),
         paths: forest.paths(&u),
     };
-    let (counter, wots) = wots_sign(pp, &sk.master, idx as u32, &forest.key).expect("no admissible WOTS+C encoding");
-    Signature { randomizer: rho, fors, counter, wots, path: sk.tree.path(idx) }
+    let (counter, wots) = wots_sign(pp, master, idx as u32, &forest.key).expect("no admissible WOTS+C encoding");
+    Ok(Signature { randomizer: rho, fors, counter, wots, path })
 }
 
 /// `Ver`.
