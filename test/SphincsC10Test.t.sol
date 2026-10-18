@@ -4,6 +4,7 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
+import "./helpers/SoundnessGates.sol";
 import "../src/keccak/SPHINCs-C10Asm.sol";
 
 /// @dev End-to-end FFI test for the C10 verifier on the FIPS 205 §4.2 uncompressed
@@ -11,7 +12,7 @@ import "../src/keccak/SPHINCs-C10Asm.sol";
 ///      JARDIN-layout variant is covered separately by legacy/test/SphincsC10Test.t.sol
 ///      driven by `signer.py c10`. The two layouts must not be fed each other's
 ///      vectors.
-contract SphincsC10Test is Test {
+contract SphincsC10Test is SoundnessGates {
     SphincsC10Asm verifier;
 
     bytes32 constant MSG = 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef;
@@ -38,6 +39,10 @@ contract SphincsC10Test is Test {
 
         assertTrue(verifier.verify(pkSeed, pkRoot, MSG, sig), "C10 signature should be valid");
 
+        // Both soundness gates return false rather than reverting. Forced-zero field
+        // and(shr(132, dVal), 0x7FF); layer-0 count at HT_START 2336 + 43*16 = 3024.
+        _checkSoundnessGatesReturnFalse(address(verifier), pkSeed, pkRoot, MSG, sig, 132, 0x7FF, 3024);
+
         uint256 gasBefore = gasleft();
         verifier.verify(pkSeed, pkRoot, MSG, sig);
         emit log_named_uint("C10 verify gas", gasBefore - gasleft());
@@ -46,7 +51,8 @@ contract SphincsC10Test is Test {
     function testC10RejectsWrongMessage() public {
         (bytes32 pkSeed, bytes32 pkRoot, bytes memory sig) = _sign("c10-fips");
         // A different message re-derives htIdx and the FORS indices, so this dies on
-        // the forced-zero or target-sum check (bare revert) or fails the root compare.
+        // the forced-zero or target-sum check or fails the root compare; all three
+        // return false.
         (bool ok, bytes memory ret) = address(verifier).staticcall(
             abi.encodeCall(SphincsC10Asm.verify, (pkSeed, pkRoot, bytes32(uint256(1)), sig))
         );

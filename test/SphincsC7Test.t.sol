@@ -4,9 +4,10 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
+import "./helpers/SoundnessGates.sol";
 import "../src/keccak/SPHINCs-C7Asm.sol";
 
-contract SphincsC7Test is Test {
+contract SphincsC7Test is SoundnessGates {
     SphincsC7Asm verifier;
 
     function setUp() public {
@@ -31,6 +32,10 @@ contract SphincsC7Test is Test {
 
         bool valid = verifier.verify(pkSeed, pkRoot, message, sig);
         assertTrue(valid, "C7 signature should be valid");
+
+        // Both soundness gates return false rather than reverting. Forced-zero field
+        // and(shr(112, dVal), 0xFFFF); layer-0 count at HT_START 1936 + 43*16 = 2624.
+        _checkSoundnessGatesReturnFalse(address(verifier), pkSeed, pkRoot, message, sig, 112, 0xFFFF, 2624);
 
         uint256 gasBefore = gasleft();
         verifier.verify(pkSeed, pkRoot, message, sig);

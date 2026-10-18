@@ -4,9 +4,10 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
+import "./helpers/SoundnessGates.sol";
 import "../src/keccak/SPHINCs-C11Asm.sol";
 
-contract SphincsC11Test is Test {
+contract SphincsC11Test is SoundnessGates {
     SphincsC11Asm verifier;
 
     function setUp() public {
@@ -31,6 +32,10 @@ contract SphincsC11Test is Test {
 
         bool valid = verifier.verify(pkSeed, pkRoot, message, sig);
         assertTrue(valid, "C11 signature should be valid");
+
+        // Both soundness gates return false rather than reverting. Forced-zero field
+        // and(shr(132, dVal), 0x7FF); layer-0 count at HT_START 2336 + 43*16 = 3024.
+        _checkSoundnessGatesReturnFalse(address(verifier), pkSeed, pkRoot, message, sig, 132, 0x7FF, 3024);
 
         uint256 gasBefore = gasleft();
         verifier.verify(pkSeed, pkRoot, message, sig);

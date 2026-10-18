@@ -103,31 +103,36 @@ contract SPHINCs_C12Asm {
             // FORS ADRS base: type=3, layer=0, tree=treeIdx, kp=leafIdx
             //   = shl(128, treeIdx) | shl(96, 3) | shl(64, leafIdx)
             let forsBase := or(or(shl(128, treeIdx), shl(96, 3)), shl(64, leafIdx))
-            let forsOff := 32   // R is 32 bytes
+            // The 20 FORS trees sit back to back after R (32 B), 128 B each
+            // (sk 16 ‖ auth 7×16), so one calldata pointer walks them all, and dVal is
+            // consumed A=7 bits per tree (treeIdx/leafIdx above are already extracted).
+            let forsPtr := add(sigBase, 32)
 
             for { let t := 0 } lt(t, 20) { t := add(t, 1) } {
-                let mdT      := and(shr(mul(7, t), dVal), 0x7F)
-                let treeOff  := add(forsOff, mul(t, 128))   // 128 = sk(16) + auth(7×16)
-                let sk       := and(calldataload(add(sigBase, treeOff)), N_MASK)
+                // tIdx = word3 at height 0 = (t << A) | md[t]  (global y across 20 trees,
+                // A=7). The tree_index at height h is tIdx >> h (= (t << (A-h)) | (md[t] >> h)),
+                // and for h < A its low bit is the path parity bit, so one shift per level.
+                let tIdx := or(shl(7, t), and(dVal, 0x7F))
+                dVal := shr(7, dVal)
 
-                // Leaf ADRS: height=0, word3 = (t << A) | mdT  (global y across 20 trees, A=7)
-                mstore(0x20, or(forsBase, or(shl(7, t), mdT)))
-                mstore(0x40, sk)
+                // Leaf ADRS: height=0 (word2), word3 = tIdx
+                mstore(0x20, or(forsBase, tIdx))
+                mstore(0x40, and(calldataload(forsPtr), N_MASK))   // sk
                 let node := and(keccak256(0x00, 0x60), N_MASK)
+                forsPtr := add(forsPtr, 16)
 
-                let authPtr := add(sigBase, add(treeOff, 16))
-                let pathIdx := mdT
-                for { let j := 0 } lt(j, 7) { j := add(j, 1) } {
-                    let sibling    := and(calldataload(add(authPtr, shl(4, j))), N_MASK)
-                    let parentIdx  := shr(1, pathIdx)
-                    // height = j+1 (word2);  global y = (t << (A - h)) | parent (word3)
-                    let globalY := or(shl(sub(6, j), t), parentIdx)
-                    mstore(0x20, or(forsBase, or(shl(32, add(j, 1)), globalY)))
-                    let s := shl(5, and(pathIdx, 1))
+                // Walk the A=7 auth levels: word2 = height climbs by one (1 << 32) per
+                // level, word3 = tIdx >> height.
+                let heightAdrs := forsBase
+                let authEnd := add(forsPtr, 112)   // 7 × 16
+                for { } lt(forsPtr, authEnd) { forsPtr := add(forsPtr, 16) } {
+                    let s := shl(5, and(tIdx, 1))
+                    tIdx := shr(1, tIdx)
+                    heightAdrs := add(heightAdrs, 0x100000000)
+                    mstore(0x20, or(heightAdrs, tIdx))
                     mstore(xor(0x40, s), node)
-                    mstore(xor(0x60, s), sibling)
+                    mstore(xor(0x60, s), and(calldataload(forsPtr), N_MASK))
                     node := and(keccak256(0x00, 0x80), N_MASK)
-                    pathIdx := parentIdx
                 }
                 // Stash root at 0x80 + t*0x20
                 mstore(add(0x80, shl(5, t)), node)
@@ -135,22 +140,18 @@ contract SPHINCs_C12Asm {
 
             // ── Compress 20 FORS roots: T_k(seed, FORS_ROOTS adrs, roots) ──
             // total = seed(32) + adrs(32) + 20*32 = 704 = 0x2C0
-            {
-                let adrsRoots := or(or(shl(128, treeIdx), shl(96, 4)), shl(64, leafIdx))
-                mstore(0x20, adrsRoots)
-                // Pack pattern identical to C11/FORS+C: pack[t] at 0x40+t*0x20,
-                // storage[t] at 0x80+t*0x20. Safe because pack[t] overwrites
-                // storage[t-2] which was already consumed.
-                for { let t := 0 } lt(t, 20) { t := add(t, 1) } {
-                    mstore(add(0x40, shl(5, t)), mload(add(0x80, shl(5, t))))
-                }
-            }
-            let currentNode := and(keccak256(0x00, 0x2C0), N_MASK)   // fors_pk
+            // Hash in place: the 20 roots already sit at 0x80+32t, so put seed and
+            // ADRS in the dead scratch words 0x40/0x60 and hash from 0x40 (same bytes
+            // as seed@0x00 ‖ adrs@0x20 ‖ roots@0x40, without a copy-down loop).
+            mstore(0x40, seed)
+            mstore(0x60, or(or(shl(128, treeIdx), shl(96, 4)), shl(64, leafIdx)))
+            let currentNode := and(keccak256(0x40, 0x2C0), N_MASK)   // fors_pk
 
             // ───────────────────── Hypertree (d=5 layers) ─────────────────────
             let curTree := treeIdx
             let curLeaf := leafIdx
-            let sigOff  := 2592   // R(32) + FORS(2560)
+            // R(32) + FORS(2560), kept as an absolute calldata pointer
+            let sigPtr  := add(sigBase, 2592)
 
             for { let layer := 0 } lt(layer, 5) { layer := add(layer, 1) } {
                 // WOTS+ digits from currentNode (128-bit value in high 16B of word).
@@ -159,79 +160,88 @@ contract SPHINCs_C12Asm {
                 //   csum = Σ (7 - digit[i])
                 //   csum_digit[j] (j=0..2) = (csum_shifted >> (13 - 3j)) & 7  (MSB-first, SLH-DSA)
 
-                // WOTS ADRS base for this layer: type=0, layer, tree=curTree, kp=curLeaf
-                let wotsBase := or(or(shl(224, layer), shl(128, curTree)), shl(64, curLeaf))
-                let wotsPtr  := add(sigBase, sigOff)
+                // WOTS ADRS base for this layer: type=0, layer, tree=curTree, kp=curLeaf.
+                // Both chain loops below walk by pointer: sigPtr steps 16 B per chain,
+                // wotsAdrs steps chain_address (word2) by 1 << 32, outPtr steps 32 B; the
+                // checksum loop continues where the message loop stopped (chain 43).
+                let wotsAdrs := or(or(shl(224, layer), shl(128, curTree)), shl(64, curLeaf))
+                let outPtr := 0x80
 
-                let csum := 0
+                let msgDigits := shr(128, currentNode)   // digit i = (msgDigits >> 3i) & 7
+
+                // csum = Σ (7 - digit[i]) = 43*7 - Σ digit[i], with a branch-free SWAR digit
+                // sum (constants assume 43 digits, LOG_W=3): the digits are bits [0,129) of
+                // msgDigits (< 2^128). Fold digit pairs into 22 6-bit lanes (<= 14), lane
+                // pairs into 11 12-bit lanes (<= 28), then multiply by sum(2^(12k), k=0..10)
+                // to collect every lane in bits 120..131. Each partial sum is <= 43*7 = 301
+                // < 4096, so no carry crosses a lane and the result is exact.
+                let csum := add(and(msgDigits, 0x1C71C71C71C71C71C71C71C71C71C71C7), and(shr(3, msgDigits), 0x1C71C71C71C71C71C71C71C71C71C71C7))
+                csum := add(and(csum, 0x3F03F03F03F03F03F03F03F03F03F03F), and(shr(6, csum), 0x3F03F03F03F03F03F03F03F03F03F03F))
+                csum := sub(301, and(shr(120, mul(csum, 0x1001001001001001001001001001001)), 0xFFF))
 
                 // ── 43 message-digit chains ──
-                for { let i := 0 } lt(i, 43) { i := add(i, 1) } {
-                    let digit := and(shr(add(128, mul(3, i)), currentNode), 7)
-                    csum := add(csum, sub(7, digit))
+                // Chain i runs hash_address digit_i..6, so the step loop counts on the ADRS
+                // word itself (word3 = hash_address is the low 32 bits, zero in wotsAdrs).
+                // The chain value lives in memory at 0x40 (its slot in the F input
+                // seed ‖ adrs ‖ value), so a step is just store ADRS, hash, mask, store.
+                for { let msgEnd := add(sigPtr, 688) } lt(sigPtr, msgEnd) { sigPtr := add(sigPtr, 16) } {
+                    let digit := and(msgDigits, 7)
+                    msgDigits := shr(3, msgDigits)
 
-                    let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
-                    // FIPS WOTS_HASH: chain_address=word2 (shl 32)
-                    let chainBase := or(wotsBase, shl(32, i))
-                    let steps := sub(7, digit)
-                    for { let s := 0 } lt(s, steps) { s := add(s, 1) } {
-                        // hash_step = digit + s  (word3, shl 0)
-                        mstore(0x20, or(chainBase, add(digit, s)))
-                        mstore(0x40, val)
-                        val := and(keccak256(0x00, 0x60), N_MASK)
+                    mstore(0x40, and(calldataload(sigPtr), N_MASK))
+                    // FIPS WOTS_HASH: chain_address=word2 (shl 32), hash_address=word3 (shl 0)
+                    let aEnd := or(wotsAdrs, 7)
+                    for { let a := or(wotsAdrs, digit) } lt(a, aEnd) { a := add(a, 1) } {
+                        mstore(0x20, a)
+                        mstore(0x40, and(keccak256(0x00, 0x60), N_MASK))
                     }
-                    mstore(add(0x80, shl(5, i)), val)
+                    mstore(outPtr, mload(0x40))
+                    outPtr := add(outPtr, 0x20)
+                    wotsAdrs := add(wotsAdrs, 0x100000000)   // chain_address += 1
                 }
 
                 // ── 3 checksum chains (i = 43, 44, 45) ──
+                // csum_digit[j] = (csumShifted >> (13 - 3j)) & 7: read bits 13..15, then
+                // shift csumShifted left by 3 for the next digit.
                 let csumShifted := shl(7, csum)
-                for { let j := 0 } lt(j, 3) { j := add(j, 1) } {
-                    let digit := and(shr(sub(13, mul(3, j)), csumShifted), 7)
-                    let i := add(43, j)
-                    let val := and(calldataload(add(wotsPtr, shl(4, i))), N_MASK)
-                    let chainBase := or(wotsBase, shl(32, i))
-                    let steps := sub(7, digit)
-                    for { let s := 0 } lt(s, steps) { s := add(s, 1) } {
-                        mstore(0x20, or(chainBase, add(digit, s)))
-                        mstore(0x40, val)
-                        val := and(keccak256(0x00, 0x60), N_MASK)
+                for { let csumEnd := add(sigPtr, 48) } lt(sigPtr, csumEnd) { sigPtr := add(sigPtr, 16) } {
+                    let digit := and(shr(13, csumShifted), 7)
+                    csumShifted := shl(3, csumShifted)
+                    mstore(0x40, and(calldataload(sigPtr), N_MASK))
+                    let aEnd := or(wotsAdrs, 7)
+                    for { let a := or(wotsAdrs, digit) } lt(a, aEnd) { a := add(a, 1) } {
+                        mstore(0x20, a)
+                        mstore(0x40, and(keccak256(0x00, 0x60), N_MASK))
                     }
-                    mstore(add(0x80, shl(5, i)), val)
+                    mstore(outPtr, mload(0x40))
+                    outPtr := add(outPtr, 0x20)
+                    wotsAdrs := add(wotsAdrs, 0x100000000)
                 }
 
                 // ── WOTS_PK compression via T_l (46 chain outputs) ──
-                // total = seed(32) + adrs(32) + 46*32 = 1536 = 0x600
-                {
-                    let pkAdrs := or(or(shl(224, layer), shl(128, curTree)),
-                                      or(shl(96, 1), shl(64, curLeaf)))
-                    mstore(0x20, pkAdrs)
-                    for { let i := 0 } lt(i, 46) { i := add(i, 1) } {
-                        mstore(add(0x40, shl(5, i)), mload(add(0x80, shl(5, i))))
-                    }
-                }
-                let wotsPk := and(keccak256(0x00, 0x600), N_MASK)
+                // total = seed(32) + adrs(32) + 46*32 = 1536 = 0x600, hashed in place from
+                // 0x40 like the FORS roots (the endpoints already sit at 0x80..).
+                mstore(0x40, seed)
+                mstore(0x60, or(or(shl(224, layer), shl(128, curTree)), or(shl(96, 1), shl(64, curLeaf))))
+                let merkleNode := and(keccak256(0x40, 0x600), N_MASK)   // wots_pk
 
-                // ── XMSS auth climb (h' = 4) ──
-                let authOff := add(sigOff, 736)   // 46 × 16
-                let authPtr := add(sigBase, authOff)
-                // XMSS_TREE ADRS base: type=2, layer, tree=curTree, kp=0
-                let xmssBase := or(or(shl(224, layer), shl(128, curTree)), shl(96, 2))
-                let merkleNode := wotsPk
+                // ── XMSS auth climb (h' = 4), auth path right after the 46 WOTS values ──
+                // XMSS_TREE ADRS: type=2, layer, tree=curTree, kp=0; word2 = height
+                // (+1 per level at shl 32), word3 = tree_index = curLeaf >> height.
+                let xmssAdrs := or(or(shl(224, layer), shl(128, curTree)), shl(96, 2))
                 let mIdx := curLeaf
-                for { let h := 0 } lt(h, 4) { h := add(h, 1) } {
-                    let sibling   := and(calldataload(add(authPtr, shl(4, h))), N_MASK)
-                    let parentIdx := shr(1, mIdx)
-                    // height = h+1 (word2), tree_index = parentIdx (word3)
-                    mstore(0x20, or(xmssBase, or(shl(32, add(h, 1)), parentIdx)))
+                for { let authEnd := add(sigPtr, 64) } lt(sigPtr, authEnd) { sigPtr := add(sigPtr, 16) } {
                     let s := shl(5, and(mIdx, 1))
+                    mIdx := shr(1, mIdx)
+                    xmssAdrs := add(xmssAdrs, 0x100000000)
+                    mstore(0x20, or(xmssAdrs, mIdx))
                     mstore(xor(0x40, s), merkleNode)
-                    mstore(xor(0x60, s), sibling)
+                    mstore(xor(0x60, s), and(calldataload(sigPtr), N_MASK))
                     merkleNode := and(keccak256(0x00, 0x80), N_MASK)
-                    mIdx := parentIdx
                 }
+                // sigPtr now points at the next layer's WOTS signature.
 
                 currentNode := merkleNode
-                sigOff      := add(authOff, 64)   // + 4 × 16
 
                 // Advance: leaf = tree & 0xF, tree = tree >> 4.
                 curLeaf := and(curTree, 0xF)
