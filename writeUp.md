@@ -9,7 +9,7 @@ _This post builds on_ [_SPHINCs-: Efficient Stateless Post-Quantum Signature Ver
 
 Most Ethereum accounts are secured by ECDSA, a signature scheme that will be broken by a sufficiently large quantum computer running Shor's algorithm. Recent resource estimates by Babbush et al. [1] suggest this threat may materialise sooner than previously assumed, creating an urgent need for post-quantum signature verification at the execution layer. Among the candidate families, hash-based signatures stand out for their conceptual simplicity and conservative security foundations: their security reduces entirely to the properties of hash functions, primitives that are well-understood and battle-tested, making them easy to reason about.
 
-[SPHINCs-](https://github.com/nconsigny/SPHINCs-) [2] adapts the NIST-standardised SLH-DSA scheme for the EVM, achieving the lowest known on-chain verification cost for PQ hash-based signatures. But stateless signing remains expensive: 4.3M keccak calls for C7, 292K for C11, reaching 390 seconds on constrained hardware wallets. Kudinov and Nick [3] proposed innovative hybrid designs (SHRINCS [4], SHRIMPS [5]) combining compact stateful signatures with a stateless SPHINCS+ fallback, but their compact path uses WOTS+C one-time signatures, which break catastrophically on reuse. A signature scheme that places catastrophic failure on the fault-resistance of a monotonic counter changes the security model of the signer in ways that are difficult to audit, particularly given that state rollback through fault injection remains a practical threat on secure elements [6].
+[SPHINCs-](https://github.com/nconsigny/SPHINCs-) [2] adapts the NIST-standardised SLH-DSA scheme for the EVM, achieving the lowest known on-chain verification cost for PQ hash-based signatures. But stateless signing remains expensive: 4.3M keccak calls for C7, 292K for C11, reaching 390 seconds with our current signer on constrained hardware wallets (about 50 s at the 5.8K Keccak-f/s that [sphincs.art](https://sphincs.art) assumes for the Ledger Nano S+). Kudinov and Nick [3] proposed innovative hybrid designs (SHRINCS [4], SHRIMPS [5]) combining compact stateful signatures with a stateless SPHINCS+ fallback, but their compact path uses WOTS+C one-time signatures, which break catastrophically on reuse. A signature scheme that places catastrophic failure on the fault-resistance of a monotonic counter changes the security model of the signer in ways that are difficult to audit, particularly given that state rollback through fault injection remains a practical threat on secure elements [6].
 
 We present [JARDIN](https://github.com/nconsigny/SPHINCs-?tab=readme-ov-file#jard%C3%ADn--compact--stateless-hybrid-account) (Judicious Authentication from Random-subset Domain-separated Indexed Nodes), a two-tier architecture that combines SPHINCs-'s cheap EVM verification with a SHRINCS-style compact/stateless split, replacing WOTS+C with FORS+C few-time signatures in the compact path. FORS+C degrades under accidental reuse (degradation can be adapted to the signing budget), removing the critical dependency on perfect state management. The compact path uses a balanced Merkle tree of 128 FORS+C instances (k=26, a=5, 130-bit one-time security, h=7) with a stateless SPHINCs- C11 fallback. We leverage the persistent memory of the smart accounts by registering the compact path as slots in the memory with a SPHINCS- stateless signature. When deriving the compact path from the seed we add randomness `r` to each lane then we commit a slot with mapping `slots[H(subPkSeed, subPkRoot)] = 1`. Once the JARDIN lane is registered normal transactions use the compact path at 119K gas and 2.6 KB; device registration and emergency recovery use the stateless path at 235K gas and 4.1 KB. The leaf index q is encoded as a single byte in the signature, requiring no on-chain state. JARDIN supports unlimited independent devices from a single 24-word mnemonic with no inter-device coordination, and enforces anti-rollback leaf consumption via hardware burn-before-sign. We implement and measure the scheme on a constrained secure element hardware wallet (3-second compact signing versus 390 seconds for the full stateless path).
 
@@ -19,11 +19,11 @@ We present [JARDIN](https://github.com/nconsigny/SPHINCs-?tab=readme-ov-file#jar
 
 The companion post on SPHINCs- described how to get post-quantum verification down to 127K gas. But verification is only half the problem. The signer must also be practical.
 
-SPHINCs- C7 requires 4.3M keccak256 calls to sign. On a desktop at ~1M hashes/second, that is ~4 seconds, acceptable. On a constrained secure element (eg. the Ledger nano S+ with a ST33 Cortex-M0+, 48MHz, no hardware keccak), signing would take minutes. Even C11, the fastest variant at 292K hashes, takes 390 seconds (6.5 minutes).
+SPHINCs- C7 requires 4.3M keccak256 calls to sign. On a desktop that is a few milliseconds (34 ms at the 128M Keccak-f permutations per second that [sphincs.art](https://sphincs.art) uses for a weak CPU). On a constrained secure element (eg. the Ledger nano S+ with a ST33 Cortex-M0+, 48MHz, no hardware keccak), at the 5.8K permutations per second sphincs.art uses for this device, signing takes about 12 minutes. Even C11 at 292K hashes takes about 50 seconds, and 390 seconds (6.5 minutes) with our current signer.
 
-Linear interpolation from Ledger's SPHINCS+-128s benchmark (6 minutes 18 seconds for 2.0M hashes) puts C7 at 11~13 minutes and C11 at ~6.5 minutes on a comparable secure element. Our measured C11 time (390 seconds) is consistent with this estimate.
+Linear interpolation from Ledger's SPHINCS+-128s benchmark (6 minutes 18 seconds for 2.0M hashes, 5.3K hashes per second, close to the 5.8K above) puts C7 at 11~13 minutes and C11 at about 55 seconds on a comparable secure element. Our measured C11 time (390 seconds) is about 7x slower than this estimate, so our signer has room to improve.
 
-JARDIN's contribution is showing that one does not need to run the full stateless scheme on every transaction. A JARDIN can be signed on constrained hardware in 3 seconds, and cost 48K gas to verify (full frame tx at 119K gas).
+JARDIN's contribution is showing that one does not need to run the full stateless scheme on every transaction. A JARDIN can be signed on constrained hardware in 3 seconds with our current signer (under half a second at 5.8K Keccak-f/s), and cost 48K gas to verify (full frame tx at 119K gas).
 
 ## 2. From one time to few time signatures
 
@@ -188,7 +188,7 @@ This is a standard Merkle inclusion proof. The bits of q determine left/right or
 ```
 [0x01][ecdsaSig 65B][subPkSeed 16B][subPkRoot 16B][C11 sig ~3,944B]
 
-Total: ~4,106 bytes | 235K gas (frame)| 390 seconds on secure element
+Total: ~4,106 bytes | 235K gas (frame)| 390 s on secure element (measured; ≈50 s at 5.8K Keccak-f/s)
 ```
 
 Used for: first transaction per device (registers the device's sub-key), emergency recovery, and slot exhaustion re-registration. Setting subPkSeed=0 and subPkRoot=0 skips registration for stateless fallback.
@@ -197,7 +197,7 @@ Used for: first transaction per device (registers the device's sub-key), emergen
 
 ```
 [0x02][ecdsaSig 65B][subPkSeed 16B][subPkRoot 16B][q 1B][FORS+C sig][merkleAuth 112B]
-Total: ~2,598 bytes (frame, constant) | 119K gas (frame) | 3.1 seconds on secure element
+Total: ~2,598 bytes (frame, constant) | 119K gas (frame) | 3.1 s on secure element (measured; ≈0.45 s at 5.8K Keccak-f/s)
 ```
 
 The verifier reads q from the explicit 1-byte field, recomputes the digest from R, counter, subPkSeed, subPkRoot, q, and the message, checks that the last a bits are zero, verifies the FORS+C body, then walks the balanced Merkle auth path (h=7 nodes) up to subPkRoot. The contract verifies `slots[keccak256(subPkSeed, subPkRoot)] != 0`, then verifies the FORS+C signature under the sub-key.
@@ -217,13 +217,13 @@ All compact-path signatures have constant size, constant verification gas, and c
 | k         | 26                 | k*a = 130 >= 128 for one-time security      |
 | a         | 5 (32 leaves/tree) | Minimises signing cost: ~2,600 hashes       |
 | n         | 16 bytes           | 128-bit hash output                         |
-| Q_MAX     | 128 (h=7)          | Balanced tree height chosen for keygen budget (~5 min on SE) |
+| Q_MAX     | 128 (h=7)          | Balanced tree height chosen for keygen budget (~5 min measured on SE, ≈55 s at 5.8K Keccak-f/s) |
 
-Signing cost: 26 trees * ~100 hashes = 2,600 keccak calls. Keygen cost per leaf: 26 * (32 + 32 + 31) + 1 = 2,471 hashes. For 128 leaves: 128 * 2,471 + 127 = 316,415 hashes (~301 seconds on a secure element). This is a one-time cost per slot.
+Signing cost: 26 trees * ~100 hashes = 2,600 keccak calls. Keygen cost per leaf: 26 * (32 + 32 + 31) + 1 = 2,471 hashes. For 128 leaves: 128 * 2,471 + 127 = 316,415 hashes (~301 seconds measured on a secure element, ≈55 s at 5.8K Keccak-f/s). This is a one-time cost per slot.
 
 ### 5.2 The r=2 security trade-off
 
-k=26, a=5 gives 105-bit security under double-signing (r=2). 2^105 hash evaluations at 10^12 hashes/second would take 10^13 years. The 3-second signing time enables the scheme on constrained hardware.
+k=26, a=5 gives 105-bit security under double-signing (r=2). 2^105 hash evaluations at 10^12 hashes/second would take 10^13 years. The 3-second measured signing time (≈0.45 s at 5.8K Keccak-f/s) enables the scheme on constrained hardware.
 
 ## 6. Multi-Device Architecture
 
