@@ -29,8 +29,8 @@ directory), and thin Python drivers/reference signers under `script/`.
 | ″ | `slhdsa-sha2-128-24-gpu` | C + Vulkan | `signers/slhvk-sha2-128-24/` | GPU-accelerated SLH-DSA (conduition `slhvk` fork). Driven by `script/slh_dsa_sha2_128_24_gpu_signer.py`. |
 | **SLH-DSA-Keccak-128-24** (`legacy/`, retired) | `slh_dsa_keccak_128_24_signer.py` / C fork | Python / C | `script/`, `signers/jardin-keccak-128-24/` | JARDIN-convention keccak twin + its `*_fast_signer.py` wrapper. Frozen. |
 | **C12** (plain SPHINCS+, `legacy/`, retired, JARDIN ADRS) | `jardin_spx_signer.py` | Python | `script/` | Self-contained; shares `jardin_primitives.py` with the JARDIN repo. |
-| **leanSphincs-23** (`src/keccak/LeanSphincs-23Asm.sol`, keccak) | `ls23k` | Rust | `signers/leansphincs23-keccak/` | Port of the upstream leanSphincs crate, keccak256 for BLAKE2s. Pruned keys (`b` = kept-subtree height); fast path for the forge FFI tests and the KAT fixture. Tiered signer: `keygen` stores the key once in a key file with a bounded node cache (Light / Standard / Full), `sign-key` signs from it, byte-identical to `sign`. |
-| ″ | `leansphincs23_signer.py` | Python | `script/` | Independent, written from `docs/leanSphincs-23-keccak.md`. Practical for `b ≈ 6..12`. |
+| **leanSphincs-23** (`legacy/src/LeanSphincs-23Asm.sol`, legacy, superseded by leanSphincs-S) | `ls23k` | Rust | `signers/leansphincs23-keccak/` | Port of the upstream leanSphincs crate, keccak256 for BLAKE2s. Pruned keys (`b` = kept-subtree height); fast path for the forge FFI tests and the KAT fixture. Tiered signer: `keygen` stores the key once in a key file with a bounded node cache (Light / Standard / Full), `sign-key` signs from it, byte-identical to `sign`. |
+| ″ | `leansphincs23_signer.py` | Python | `script/` | Independent, written from `legacy/docs/leanSphincs-23-keccak.md`. Practical for `b ≈ 6..12`. |
 | **leanSphincs-S** (`src/keccak/LeanSphincs-SAsm.sol`, keccak) | `lssk` | Rust | `signers/leansphincs-s-keccak/` | Port of the upstream crate's `keccak` branch (h=26, no FORS key hash), by way of `ls23k`, whose tiers, key file and CLI it keeps. Counts keccak calls and Keccak-f permutations. Fast path for the forge FFI tests and the KAT fixture. |
 | ″ | `leansphincs_s_signer.py` | Python | `script/` | Independent, written from `docs/leanSphincs-S-keccak.md`; `--upstream-kat` reproduces the upstream keccak branch's `known_answer`. Practical for `b ≈ 6..12`. |
 
@@ -52,12 +52,13 @@ directory), and thin Python drivers/reference signers under `script/`.
   (JARDIN 32-byte ADRS, native `keccak256`). Kept reproducible for `legacy/`.
 - **`c13-crosscheck/`** — Python harness that cross-validates the C13 Python and
   Rust signers against each other (and the verifier) at full parameters.
-- **`leansphincs23-keccak/`** — Rust crate for leanSphincs-23 over keccak256
+- **`leansphincs23-keccak/`** — legacy (verifier in `legacy/src`, superseded by
+  leanSphincs-S). Rust crate for leanSphincs-23 over keccak256
   (`h=25,d=1,k=13,a=12`, WOTS+C `T=128`, 4,148-B sig). Bin `ls23k`
   (`sign` / `kat` / `verify`, and the tiered signer's `keygen` / `sign-key` /
   `info`: seed from `--seed-file` or `--seed-stdin`, never argv; the key file
   holds it; one seed, one key). `crosscheck.py` holds it to byte equality with
-  the Python signer; `make_kat_fixture.py` writes the Forge KAT fixture;
+  the Python signer; `make_kat_fixture.py` writes the legacy Forge KAT fixture;
   `tier_model.py` is the sphincs-art tier cost model. See its `README.md` and
   spec §14. Build: `cd signers/leansphincs23-keccak && cargo build --release`.
 - **`leansphincs-s-keccak/`** — Rust crate for leanSphincs-S over keccak256
@@ -79,8 +80,8 @@ directory), and thin Python drivers/reference signers under `script/`.
   (noble ↔ pinned on-chain KAT), plus the Forge KAT
   (`test/SLH-DSA-SHA2-128-24-KAT.t.sol`).
 - **leanSphincs-23**: `signers/leansphincs23-keccak/crosscheck.py` (Rust ↔
-  Python, plus a spec-literal third recomputation), and the Forge KAT fixture
-  `test/fixtures/leansphincs23-keccak-kat.json` (`make_kat_fixture.py --check`).
+  Python, plus a spec-literal third recomputation), and the legacy Forge KAT fixture
+  `legacy/test/fixtures/leansphincs23-keccak-kat.json` (`make_kat_fixture.py --check`).
   The tiered `sign-key` is held to `ls23k sign` byte for byte (the crate's
   tests, the Forge FFI test `testVerifyFFI_RustLightTierKeyFile`, CI), and its
   call counts to `tier_model.py`.

@@ -27,6 +27,20 @@ and `script/signer.py` variants `c6` / `c8` / `c10` / `c11-jardin`) are unchange
 legacy tests FFI-call them by repo-root path (`script/...`), so they stay in
 `script/`. The migrated FIPS C12 has its own signer at `script/spx_fips_signer.py`.
 
+**leanSphincs-23** (`LeanSphincs-23Asm.sol`) was retired here when leanSphincs-S
+(`src/keccak/LeanSphincs-SAsm.sol`, spec `docs/leanSphincs-S-keccak.md`) superseded it:
+the sphincs-art leanSphincs set gained one tree level (h = 25 → 26, rated 2^26 for the
+Full tier) and moved to the upstream crate's `keccak` branch construction, whose merged
+WOTS+C encoding absorbs the FORS tops directly (no FORS key hash). It is not a SPHINCS+
+ADRS scheme and does not share the JARDIN kernel; it keeps leanSphincs's own 16-byte
+tweak. Its spec moved with it (`legacy/docs/leanSphincs-23-keccak.md`), and so did its
+Forge suites and their KAT fixture (`legacy/test/fixtures/leansphincs23-keccak-kat.json`).
+Its signers stay where they are: the Rust crate `signers/leansphincs23-keccak` (`ls23k`,
+whose `make_kat_fixture.py` now writes the fixture under `legacy/test/fixtures`) and the
+Python `script/leansphincs23_signer.py`; the CI `leansphincs23` job still runs their
+cargo tests, the Rust ↔ Python crosscheck, `make_kat_fixture.py --check` and these Forge
+suites. Never reuse a leanSphincs-23 seed for leanSphincs-S.
+
 ## What's here
 
 ### `legacy/src/` — Solidity verifiers
@@ -36,6 +50,7 @@ legacy tests FFI-call them by repo-root path (`script/...`), so they stay in
 | `SPHINCs-C6Asm.sol`, `SPHINCs-C8Asm.sol`, `SPHINCs-C10Asm.sol`, `SPHINCs-C11Asm.sol` | Stateless SPHINCs- WOTS+C + FORS+C verifiers (n=128, d=2), JARDIN 32-byte ADRS. C10/C11 have FIPS-layout successors in `src/keccak/`. |
 | `SPHINCs-C12Asm.sol` | Plain SPHINCS+ (SPX) verifier, JARDIN 32-byte ADRS. 6,512-B sig, ~276 K verify. `JardinSpxVerifier` in the JARDIN repo. |
 | `SLH-DSA-keccak-128-24verifier.sol` | JARDIN-convention Keccak twin of SLH-DSA-128-24 (keccak opcode, 32-byte ADRS). The SHA-2 twin stays live in `src/sha/`. |
+| `LeanSphincs-23Asm.sol` | leanSphincs-23 over keccak256 (n=16, h=25, d=1, FORS k=13 a=12, WOTS+C T=128; 4,148-B sig, ~39 K verify, 249 keccak256 calls). leanSphincs's own 16-byte tweak, not a FIPS ADRS. Superseded by `src/keccak/LeanSphincs-SAsm.sol`. |
 
 ### `legacy/script/` — Off-chain signers, UserOp builders, deploy scripts
 
@@ -54,14 +69,26 @@ legacy tests FFI-call them by repo-root path (`script/...`), so they stay in
 | `SphincsC8Test.t.sol`, `SphincsC10Test.t.sol`, `SphincsC11Test.t.sol` | JARDIN-layout C8 / C10 / C11 verifiers. |
 | `SphincsC12Test.t.sol` | JARDIN-layout plain SPHINCS+ C12 verifier. |
 | `SLH-DSA-Keccak-128-24-CalldataGas.t.sol`, `SLH-DSA-keccak-128-24-Test.t.sol` | Keccak SLH-DSA-128-24 twin (calldata-gas + FFI round-trip). |
+| `LeanSphincs23Test.t.sol`, `SphincsAccountLeanSphincs23Test.t.sol` | leanSphincs-23 verifier (KATs, tampering, spec model, random digests, gas ceiling, `ls23k` FFI round-trips) and the `SphincsAccount` wired to it. Read `fixtures/leansphincs23-keccak-kat.json` (allowed by `fs_permissions` in `foundry.toml`); the FFI tests need `ls23k` built (`cd signers/leansphincs23-keccak && cargo build --release`). |
 
 These tests are not compiled by the default `forge test` run (Foundry only
 scans `test/` at the project root). Run them from the repo root with
 `FOUNDRY_TEST=legacy/test forge test` (the CI `legacy-verifiers` job does
 exactly this); the root working directory matters because the FFI signer paths
-are repo-root-relative.
+are repo-root-relative. For one suite, e.g. leanSphincs-23:
+`FOUNDRY_TEST=legacy/test forge test --match-contract LeanSphincs23 -vv`.
+
+### `legacy/docs/` — Specs of retired schemes
+
+| File | What it is |
+|---|---|
+| `leanSphincs-23-keccak.md` | The leanSphincs-23 keccak256 instantiation that `legacy/src/LeanSphincs-23Asm.sol`, `signers/leansphincs23-keccak` and `script/leansphincs23_signer.py` implement ("the spec" in their comments). Frozen; its successor is `docs/leanSphincs-S-keccak.md`. |
 
 ## Why they're kept
+
+leanSphincs-23 is kept so the leanSphincs-S delta (`docs/leanSphincs-S-keccak.md`) stays
+checkable against a working predecessor, and because its signer crate is the base the
+leanSphincs-S crate was derived from.
 
 The JARDIN-layout verifiers here share one 32-byte ADRS layout and one set of
 tweakable hash primitives (`script/jardin_primitives.py::th / th_pair /

@@ -4,9 +4,9 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/keccak/LeanSphincs-23Asm.sol";
-import "../src/SphincsAccount.sol";
-import "../src/SphincsAccountFactory.sol";
+import "../src/LeanSphincs-23Asm.sol";
+import "../../src/SphincsAccount.sol";
+import "../../src/SphincsAccountFactory.sol";
 import "account-abstraction/interfaces/IEntryPoint.sol";
 import "account-abstraction/core/Helpers.sol";
 
@@ -25,7 +25,7 @@ contract SphincsAccountLeanSphincs23Test is Test {
     // userOpHash is an input to it, so the test pranks as the EntryPoint and supplies the hash.
     address constant ENTRYPOINT_V09 = 0x433709009B8330FDa32311DF1C2AFA402eD8D009;
 
-    string constant FIXTURE = "test/fixtures/leansphincs23-keccak-kat.json";
+    string constant FIXTURE = "legacy/test/fixtures/leansphincs23-keccak-kat.json";
     string constant LS23K = "signers/leansphincs23-keccak/target/release/ls23k";
     // Prints `fresh`, `missing`, or `stale` when a crate source (Cargo.toml, Cargo.lock, src/**.rs,
     // as crosscheck.py's ensure_binary) is newer than the binary. Same probe as LeanSphincs23Test.

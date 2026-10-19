@@ -6,7 +6,8 @@ pragma solidity ^0.8.28;
 /// @title LeanSphincs23Asm — Stateless leanSphincs-23 verifier over keccak256 (shared, Yul)
 /// @notice leanSphincs-23: one XMSS layer h=25 (d=1), FORS k=13 a=12 (no tree roots: the two
 ///         top nodes of each tree), WOTS+C v=64 chains of 4 positions (w=2 bits), target sum
-///         T=128, n=16, sig=4148 B. Spec: docs/leanSphincs-23-keccak.md ("spec §N" below).
+///         T=128, n=16, sig=4148 B. Spec: legacy/docs/leanSphincs-23-keccak.md ("spec §N" below).
+///         Retired to legacy/: superseded by leanSphincs-S (src/keccak/LeanSphincs-SAsm.sol).
 ///         Port of the upstream leanSphincs crate (Tom Wambsgans, crates/sphincs, BLAKE2s);
 ///         the only change is keccak256 in place of BLAKE2s.
 /// @dev    Tweakable hash (spec §2):
@@ -63,7 +64,7 @@ pragma solidity ^0.8.28;
 ///         costs more for some step counts than for others, and nothing else depends on the
 ///         signature. Typical signatures differ by a few hundred gas; the extremes over all
 ///         admissible codewords are about 1,000 apart (see VERIFY_GAS_MAX in
-///         test/LeanSphincs23Test.t.sol). Every input is public, so this leaks nothing.
+///         legacy/test/LeanSphincs23Test.t.sol). Every input is public, so this leaks nothing.
 ///
 ///         Loop structure: the 11 FORS levels and the 25 XMSS levels are unrolled, so every
 ///         shift, mask, address constant and calldata offset in them is a literal; the 13

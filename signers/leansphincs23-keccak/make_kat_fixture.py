@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Regenerate test/fixtures/leansphincs23-keccak-kat.json, the known-answer
-fixture that test/LeanSphincs23Test.t.sol reads.
+Regenerate legacy/test/fixtures/leansphincs23-keccak-kat.json, the known-answer
+fixture that legacy/test/LeanSphincs23Test.t.sol reads (leanSphincs-23 is legacy:
+verifier in legacy/src, Forge suites run with FOUNDRY_TEST=legacy/test).
 
 Each vector is the JSON object printed by the Rust signer,
-`ls23k kat <seed> <b> <message>` (docs/leanSphincs-23-keccak.md, "the spec"),
+`ls23k kat <seed> <b> <message>` (legacy/docs/leanSphincs-23-keccak.md, "the spec"),
 plus a short label and `above_target_counter`: the least WOTS+C counter whose
 codeword sum EXCEEDS the target T = 128 for that signature's FORS key, which
 the Forge tests use to check the Σ > T side of the target-sum check (a random
@@ -36,7 +37,7 @@ from crosscheck import (  # noqa: E402  (pycryptodome is imported there)
 
 REPO_ROOT = CRATE_DIR.parents[1]
 PY_SIGNER = REPO_ROOT / "script" / "leansphincs23_signer.py"
-FIXTURE = REPO_ROOT / "test" / "fixtures" / "leansphincs23-keccak-kat.json"
+FIXTURE = REPO_ROOT / "legacy" / "test" / "fixtures" / "leansphincs23-keccak-kat.json"
 
 
 SEEDS = {
@@ -119,7 +120,7 @@ def main():
 
     fixture = {
         "scheme": "leanSphincs-23-keccak",
-        "spec": "docs/leanSphincs-23-keccak.md",
+        "spec": "legacy/docs/leanSphincs-23-keccak.md",
         "params": "n=16 h=25 d=1 a=12 k=13 w=2 v=64 T=128, sig=4148 B",
         "hash": "keccak256 (Ethereum, 0x01 padding)",
         "key_words": "pkSeed = P || 0^16, pkRoot = root || 0^16 (high-aligned)",

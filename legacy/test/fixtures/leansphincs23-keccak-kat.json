@@ -1,6 +1,6 @@
 {
   "scheme": "leanSphincs-23-keccak",
-  "spec": "docs/leanSphincs-23-keccak.md",
+  "spec": "legacy/docs/leanSphincs-23-keccak.md",
   "params": "n=16 h=25 d=1 a=12 k=13 w=2 v=64 T=128, sig=4148 B",
   "hash": "keccak256 (Ethereum, 0x01 padding)",
   "key_words": "pkSeed = P || 0^16, pkRoot = root || 0^16 (high-aligned)",

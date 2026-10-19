@@ -7,9 +7,10 @@ name: CI
 #   - SLH-DSA-SHA2 FIPS-205-external conformance — via a pinned, reproducible KAT
 #     forge test and real-signature FFI round-trips (SLH-X-f1, SLH-X-f4/f5);
 #   - SLH-DSA-SHA2 Python↔C (FIPS reference) primitive parity — via crosscheck.py;
-#   - leanSphincs-23-keccak Rust↔Python signer desync, a KAT fixture the sources no
-#     longer reproduce, and verifier regressions (KATs, tampering, gas ceiling) — via
-#     cargo test, crosscheck.py, make_kat_fixture.py --check and forge test;
+#   - leanSphincs-23-keccak (legacy: verifier in legacy/src) Rust↔Python signer desync,
+#     a KAT fixture the sources no longer reproduce, and verifier regressions (KATs,
+#     tampering, gas ceiling) — via cargo test, crosscheck.py, make_kat_fixture.py
+#     --check and FOUNDRY_TEST=legacy/test forge test;
 #   - the same for leanSphincs-S-keccak, plus the Python signer's reproduction of the
 #     upstream keccak branch's known_answer (leansphincs-s);
 #   - the frozen legacy/ verifiers, which live outside the default forge test path
@@ -59,9 +60,6 @@ jobs:
         run: cargo build --release
       - name: Build SLH-DSA-SHA2 C reference signer (FIPS oracle / fast signer backend)
         run: make -C signers/sphincsplus-128-24
-      - name: Build leanSphincs-23 Rust signer CLI (ls23k, for the LeanSphincs23 FFI tests)
-        working-directory: signers/leansphincs23-keccak
-        run: cargo build --release
       - name: Build leanSphincs-S Rust signer CLI (lssk, for the LeanSphincsS FFI tests)
         working-directory: signers/leansphincs-s-keccak
         run: cargo build --release
@@ -97,19 +95,21 @@ jobs:
           MSG=deadbeef00000000000000000000000000000000000000000000000000000000
           python3 signers/sphincsplus-128-24/crosscheck.py "$SEED" "$MSG" "$OPTRAND" --h 6 --a 8
 
-  # ── leanSphincs-23 over keccak256 (src/keccak/LeanSphincs-23Asm.sol; signer
-  #    signers/leansphincs23-keccak, a Rust port of the upstream crate). Unit tests in
-  #    release and in the debug test profile (overflow checks on); the byte-for-byte
+  # ── leanSphincs-23 over keccak256 (legacy: verifier legacy/src/LeanSphincs-23Asm.sol,
+  #    superseded by leanSphincs-S; signer signers/leansphincs23-keccak, a Rust port of
+  #    the upstream crate). Unit tests in release and in the debug test profile
+  #    (overflow checks on); the byte-for-byte
   #    Rust↔Python crosscheck on 16 pruned-key vectors, with its spec-literal third
-  #    opinion; the Forge KAT fixture, which must still be exactly what the current
-  #    sources produce; and the verifier's Forge suites (the --match-contract regex also
-  #    selects SphincsAccountLeanSphincs23Test). The tiered signer: a Light-tier key file
+  #    opinion; the Forge KAT fixture (legacy/test/fixtures), which must still be exactly
+  #    what the current sources produce; and the verifier's legacy Forge suites, run with
+  #    FOUNDRY_TEST=legacy/test (the --match-contract regex also selects
+  #    SphincsAccountLeanSphincs23Test). The tiered signer: a Light-tier key file
   #    (keygen, seed on stdin) must sign exactly what the stateless `ls23k sign` signs,
   #    and `ls23k info` must agree with the cost model tier_model.py; no Standard or
   #    Full keygen here. ls23k is built first: under CI the three Forge FFI tests fail
   #    rather than skip when it is missing, and every consumer refuses a binary older
-  #    than the crate sources. The solidity job runs the same Forge suites again inside
-  #    the full forge test. ──
+  #    than the crate sources. The legacy-verifiers job runs the same Forge suites again
+  #    inside the full legacy forge test. ──
   leansphincs23:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -167,8 +167,10 @@ jobs:
           assert info["keygen_calls"] == light["keygen"] - 1 == 1851416, "keygen calls"
           print("light tier: sign-key == sign; info matches tier_model.py")
           EOF
-      - name: forge test (KATs, tampering, spec model, random digests, verify-frame gas ceiling, 4337 account, ls23k FFI round-trips)
-        run: forge test --match-contract LeanSphincs23Test -vv
+      - name: forge test, legacy suites (KATs, tampering, spec model, random digests, verify-frame gas ceiling, 4337 account, ls23k FFI round-trips)
+        env:
+          FOUNDRY_TEST: legacy/test
+        run: forge test --match-contract LeanSphincs23 -vv
 
   # ── leanSphincs-S over keccak256 (src/keccak/LeanSphincs-SAsm.sol; signer
   #    signers/leansphincs-s-keccak, a Rust port of the upstream crate's keccak branch:
@@ -257,14 +259,16 @@ jobs:
   #    (Foundry only scans test/), so they need an explicit job to be covered.
   #    Builds BOTH C signers: the fast-signer wrappers refuse a binary older than
   #    any .c/.h/Makefile beside it, so a missing or stale build fails here rather
-  #    than signing under a superseded scheme. Slow because the two SLH-DSA-Keccak
-  #    suites do real NIST-params signs.
+  #    than signing under a superseded scheme. Also builds ls23k: under CI the
+  #    LeanSphincs23 FFI tests fail rather than skip when it is missing. Slow because
+  #    the two SLH-DSA-Keccak suites do real NIST-params signs.
   legacy-verifiers:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -274,9 +278,12 @@ jobs:
         run: |
           make -C signers/sphincsplus-128-24
           make -C signers/jardin-keccak-128-24
+      - name: Build leanSphincs-23 Rust signer CLI (ls23k, for the LeanSphincs23 FFI tests)
+        working-directory: signers/leansphincs23-keccak
+        run: cargo build --release
       - name: forge build
         run: forge build
-      - name: forge test (legacy/ suites — C8/C10/C11/C12 + both SLH-DSA-Keccak)
+      - name: forge test (legacy/ suites — C8/C10/C11/C12, both SLH-DSA-Keccak, leanSphincs-23)
         env:
           FOUNDRY_TEST: legacy/test
         run: forge test -vv

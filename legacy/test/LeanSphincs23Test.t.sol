@@ -4,11 +4,11 @@
 pragma solidity ^0.8.28;
 
 import "forge-std/Test.sol";
-import "../src/keccak/LeanSphincs-23Asm.sol";
+import "../src/LeanSphincs-23Asm.sol";
 
-/// @notice Tests for the leanSphincs-23 keccak256 verifier (spec: docs/leanSphincs-23-keccak.md,
+/// @notice Tests for the leanSphincs-23 keccak256 verifier (spec: legacy/docs/leanSphincs-23-keccak.md,
 ///         "spec §N" below).
-///         - Known answers: test/fixtures/leansphincs23-keccak-kat.json holds `ls23k kat` vectors
+///         - Known answers: legacy/test/fixtures/leansphincs23-keccak-kat.json holds `ls23k kat` vectors
 ///           from the Rust signer (signers/leansphincs23-keccak), each confirmed by the independent
 ///           Python verifier (script/leansphincs23_signer.py --verify). Regenerate with
 ///           `.venv/bin/python signers/leansphincs23-keccak/make_kat_fixture.py`. The vectors use
@@ -31,11 +31,13 @@ import "../src/keccak/LeanSphincs-23Asm.sol";
 ///           (`ls23k keygen` + `sign-key`, spec §14), which must equal the stateless signer's
 ///           bytes (skipped when the CLI is not built, except under CI; fails when the binary is
 ///           older than the crate sources).
-///         Requires fs read access to test/fixtures (see `fs_permissions` in foundry.toml).
+///         Requires fs read access to legacy/test/fixtures (see `fs_permissions` in foundry.toml).
+///         Legacy suite: run from the repo root with
+///         `FOUNDRY_TEST=legacy/test forge test --match-contract LeanSphincs23`.
 contract LeanSphincs23Test is Test {
     LeanSphincs23Asm verifier;
 
-    string constant FIXTURE = "test/fixtures/leansphincs23-keccak-kat.json";
+    string constant FIXTURE = "legacy/test/fixtures/leansphincs23-keccak-kat.json";
     string constant LS23K = "signers/leansphincs23-keccak/target/release/ls23k";
     // Prints `fresh`, `missing`, or `stale` when a crate source (Cargo.toml, Cargo.lock, src/**.rs,
     // as crosscheck.py's ensure_binary) is newer than the binary.

@@ -1,11 +1,17 @@
 # leanSphincs-23 over keccak256
 
+> **Retired (legacy).** leanSphincs-23 is superseded by leanSphincs-S (one more tree level, `h = 26`, and the
+> upstream `keccak` branch's merged encoding): see [`docs/leanSphincs-S-keccak.md`](../../docs/leanSphincs-S-keccak.md).
+> The verifier now lives in `legacy/src/LeanSphincs-23Asm.sol`, its Forge suites in `legacy/test/` (run with
+> `FOUNDRY_TEST=legacy/test forge test --match-contract LeanSphincs23`); the signers
+> (`signers/leansphincs23-keccak`, `script/leansphincs23_signer.py`) stay where they are. This spec is frozen.
+
 leanSphincs-23 is the retuned leanSphincs set from the
 [sphincs-art fork](https://nconsigny.github.io/sphincs-art/) (source:
 [nconsigny/sphincs-art](https://github.com/nconsigny/sphincs-art)). leanSphincs itself is Tom Wambsgans'
 proposal ([note](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates/releases/download/doc-latest/leanSPHINCS.pdf),
 [code](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates/tree/main/crates/sphincs)). This
-document pins the keccak256 instantiation that the on-chain verifier `src/keccak/LeanSphincs-23Asm.sol`
+document pins the keccak256 instantiation that the on-chain verifier `legacy/src/LeanSphincs-23Asm.sol`
 checks.
 
 **The only change from the upstream BLAKE2s construction is the hash function.** Every address, byte order,
@@ -380,4 +386,4 @@ not the verifier, and not the signer or the key file, which keep no count of sig
 - **Signing is deterministic.** The same message gives the same signature, which reveals nothing new. Each distinct
   message counts against the lifetime.
 - **The verifier is unchanged.** Tiered signatures are the stateless signer's signatures, so
-  `src/keccak/LeanSphincs-23Asm.sol`, the 249-call verification and the KAT fixture apply as they are.
+  `legacy/src/LeanSphincs-23Asm.sol`, the 249-call verification and the KAT fixture apply as they are.

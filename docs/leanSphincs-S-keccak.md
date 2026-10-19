@@ -16,7 +16,7 @@ the message-digest field layout (upstream's is specific to `a = 10`, two calls);
 call, as for leanSphincs-23. The sphincs-art Keccak-256 figures for leanSphincs-S (259 permutations, 4,164 bytes)
 are this construction.
 
-**Differences from leanSphincs-23** (`docs/leanSphincs-23-keccak.md`, verifier `LeanSphincs-23Asm.sol`): one more
+**Differences from leanSphincs-23** (retired: [`legacy/docs/leanSphincs-23-keccak.md`](../legacy/docs/leanSphincs-23-keccak.md), verifier `legacy/src/LeanSphincs-23Asm.sol`): one more
 tree level (`h = 26`, one more auth-path node, 4,164-byte signature) and the merged encoding (§6, §7). Every
 other address, byte order, field split and serialization is the same.
 

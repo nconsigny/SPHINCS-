@@ -1,8 +1,12 @@
 # leansphincs23-keccak
 
 Rust signer for **leanSphincs-23 over keccak256**, the scheme the on-chain verifier
-`src/keccak/LeanSphincs-23Asm.sol` checks. The spec is
-[`docs/leanSphincs-23-keccak.md`](../../docs/leanSphincs-23-keccak.md).
+`legacy/src/LeanSphincs-23Asm.sol` checks. The spec is
+[`legacy/docs/leanSphincs-23-keccak.md`](../../legacy/docs/leanSphincs-23-keccak.md).
+
+**Legacy (verifier in `legacy/src`).** leanSphincs-23 is superseded by leanSphincs-S
+([`signers/leansphincs-s-keccak`](../leansphincs-s-keccak)); this crate stays here, maintained, to keep the
+legacy verifier's KAT fixture and Forge suites reproducible.
 
 It is a port of Tom Wambsgans' upstream leanSphincs crate
 ([leanXMSS-leanSPHINCS-candidates](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates), `crates/sphincs`,
@@ -261,16 +265,16 @@ and exits nonzero on any difference. It refuses an `ls23k` older than the crate 
 .venv/bin/python signers/leansphincs23-keccak/make_kat_fixture.py [--check] [--no-build]
 ```
 
-`make_kat_fixture.py` writes `test/fixtures/leansphincs23-keccak-kat.json`: six `ls23k kat` vectors (b = 6, 10, 12;
+`make_kat_fixture.py` writes `legacy/test/fixtures/leansphincs23-keccak-kat.json`: six `ls23k kat` vectors (b = 6, 10, 12;
 messages all-zero, all-`0xff`, `0xdeadbeef` × 8 and a keccak-derived one), each confirmed by the Python `--verify`
 (valid, and invalid for a one-bit message flip). Each vector also carries `above_target_counter`, the least counter
 whose codeword sum exceeds `T = 128` for that signature's FORS key, which the Forge tests use to check the `Σ > T`
-side of the target-sum check. `test/LeanSphincs23Test.t.sol` and `test/SphincsAccountLeanSphincs23Test.t.sol` read
+side of the target-sum check. `legacy/test/LeanSphincs23Test.t.sol` and `legacy/test/SphincsAccountLeanSphincs23Test.t.sol` read
 it. The output is deterministic; `--check` fails if the committed file is stale. Like `crosscheck.py`, it refuses an
 `ls23k` older than the crate sources, so `--no-build` cannot write a fixture the sources do not reproduce.
 
 ```sh
-forge test --match-contract LeanSphincs23Test -vv
+FOUNDRY_TEST=legacy/test forge test --match-contract LeanSphincs23 -vv   # legacy suites, from the repo root
 ```
 
 The three Forge FFI tests sign with `ls23k`: `testVerifyFFI_Rust` and `testValidateUserOpFFI_Rust` with `sign`, and
@@ -278,6 +282,6 @@ The three Forge FFI tests sign with `ls23k`: `testVerifyFFI_Rust` and `testValid
 into a `mktemp -d` directory and `sign-key`, then removes the key file and the directory. The verifier must accept the
 result, and it must equal `ls23k sign <seed> 13 <msg>` byte for byte. They fail if the binary is older than the crate
 sources. If it is not built they are reported as skipped, except under CI (`CI` set), where they fail: the CI
-`solidity` job builds `ls23k` before `forge test`, and the `leansphincs23` job runs the cargo tests, the crosscheck,
+`legacy-verifiers` job builds `ls23k` before the legacy `forge test`, and the `leansphincs23` job runs the cargo tests, the crosscheck,
 `make_kat_fixture.py --check`, a Light-tier `keygen` + `sign-key` against `sign`, `tier_model.py --check` and
 `--json`, and these Forge suites.

@@ -3,7 +3,7 @@
 // crates/sphincs), MIT OR Apache-2.0, Copyright (c) 2026 Tom Wambsgans, see LICENSE.upstream. That crate is in turn
 // adapted from leanVM's SPHINCS crate (https://github.com/leanEthereum/leanVM, crates/sphincs), MIT OR Apache-2.0,
 // Copyright (c) 2026 leanEthereum, under the same MIT terms.
-// Re-parameterized to leanSphincs-23 (docs/leanSphincs-23-keccak.md): one XMSS layer (d = 1) of height h = 25, plain
+// Re-parameterized to leanSphincs-23 (legacy/docs/leanSphincs-23-keccak.md): one XMSS layer (d = 1) of height h = 25, plain
 // FORS with k = 13 trees of height a = 12, WOTS+C with w = 4, 64 chains and target sum 128, and pruned keys (a kept
 // subtree plus pseudorandom surrogate siblings). The hash is keccak256 instead of BLAKE2s; addresses, byte orders and
 // serialization are upstream's, and the message digest is one call laid out for a = 12 (spec section 5).

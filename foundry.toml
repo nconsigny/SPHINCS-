@@ -8,12 +8,15 @@ optimizer_runs = 200
 ffi = true
 # Read-only access for:
 # - the JSON KAT fixture (SLH-DSA-SHA2-128-24-JsonKAT.t.sol)
-# - the JSON KAT fixtures under test/fixtures (LeanSphincs23Test, SphincsAccountLeanSphincs23Test)
+# - the JSON KAT fixtures under test/fixtures (LeanSphincsSTest, SphincsAccountLeanSphincsSTest)
+#   and legacy/test/fixtures (LeanSphincs23Test, SphincsAccountLeanSphincs23Test; legacy suites,
+#   run with FOUNDRY_TEST=legacy/test)
 # - build artifacts, so SphincsFrameAccountC13Test can load the compiled Yul module
 #   (vm.getCode cannot resolve Yul artifacts — they carry no ABI)
 fs_permissions = [
     { access = "read", path = "./signers/slhvk-sha2-128-24/kat-counter0.json" },
     { access = "read", path = "./test/fixtures" },
+    { access = "read", path = "./legacy/test/fixtures" },
     { access = "read", path = "./out" },
 ]
 

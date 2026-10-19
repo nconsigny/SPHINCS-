@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
 leanSphincs-23 signer over keccak256 — independent Python reference.
+Legacy (verifier in legacy/src): leanSphincs-23 is superseded by leanSphincs-S
+(script/leansphincs_s_signer.py); kept to reproduce the legacy KAT fixture.
 
 leanSphincs is Tom Wambsgans' one-layer SPHINCS candidate (leanSPHINCS note,
 leanXMSS-leanSPHINCS-candidates `crates/sphincs`, BLAKE2s). leanSphincs-23 is the
 sphincs-art retuning of it; this file instantiates it with Ethereum Keccak-256 in
-place of BLAKE2s, exactly as pinned by docs/leanSphincs-23-keccak.md ("the spec",
+place of BLAKE2s, exactly as pinned by legacy/docs/leanSphincs-23-keccak.md ("the spec",
 section numbers below refer to it). It is written from the spec alone, so that
 it can be cross-checked byte-for-byte against the Rust port of the upstream crate
 (signers/leansphincs23-keccak) and against the on-chain verifier
-(src/keccak/LeanSphincs-23Asm.sol).
+(legacy/src/LeanSphincs-23Asm.sol).
 
 Parameters (spec §1):
     n = 16 (node bytes)   |P| = 16   |rho| = 16   |m| = 32   counter c = u32 LE

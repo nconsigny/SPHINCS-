@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cost model for the leanSphincs-23 signer tiers, in keccak256 calls (docs/leanSphincs-23-keccak.md, "Tiered signers").
+Cost model for the leanSphincs-23 signer tiers, in keccak256 calls (legacy/docs/leanSphincs-23-keccak.md, "Tiered signers").
 
 The tiers are the "One signer, leanSphincs-23" table of the sphincs-art fork (https://nconsigny.github.io/sphincs-art/).
 The key is generated once, keeping a subtree of 2^b leaves (spec §9), and stored with a node cache of bounded size.

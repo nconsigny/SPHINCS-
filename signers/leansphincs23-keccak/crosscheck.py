@@ -4,7 +4,7 @@ Cross-validate the Rust leanSphincs-23-keccak signer (`ls23k`, a port of the
 upstream crate) against the independent Python signer
 (script/leansphincs23_signer.py), byte for byte.
 
-Both implement docs/leanSphincs-23-keccak.md ("the spec", section numbers
+Both implement legacy/docs/leanSphincs-23-keccak.md ("the spec", section numbers
 below refer to it). Keygen and signing are deterministic, so for one
 (seed, b, message) the two must agree on every output: pkSeed, pkRoot, the
 4148-byte signature, idx, the WOTS+C counter, the randomizer and the 13 FORS
