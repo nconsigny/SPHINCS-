@@ -31,6 +31,8 @@ directory), and thin Python drivers/reference signers under `script/`.
 | **C12** (plain SPHINCS+, `legacy/`, retired, JARDIN ADRS) | `jardin_spx_signer.py` | Python | `script/` | Self-contained; shares `jardin_primitives.py` with the JARDIN repo. |
 | **leanSphincs-23** (`src/keccak/LeanSphincs-23Asm.sol`, keccak) | `ls23k` | Rust | `signers/leansphincs23-keccak/` | Port of the upstream leanSphincs crate, keccak256 for BLAKE2s. Pruned keys (`b` = kept-subtree height); fast path for the forge FFI tests and the KAT fixture. Tiered signer: `keygen` stores the key once in a key file with a bounded node cache (Light / Standard / Full), `sign-key` signs from it, byte-identical to `sign`. |
 | ″ | `leansphincs23_signer.py` | Python | `script/` | Independent, written from `docs/leanSphincs-23-keccak.md`. Practical for `b ≈ 6..12`. |
+| **leanSphincs-S** (`src/keccak/LeanSphincs-SAsm.sol`, keccak) | `lssk` | Rust | `signers/leansphincs-s-keccak/` | Port of the upstream crate's `keccak` branch (h=26, no FORS key hash), by way of `ls23k`, whose tiers, key file and CLI it keeps. Counts keccak calls and Keccak-f permutations. Fast path for the forge FFI tests and the KAT fixture. |
+| ″ | `leansphincs_s_signer.py` | Python | `script/` | Independent, written from `docs/leanSphincs-S-keccak.md`; `--upstream-kat` reproduces the upstream keccak branch's `known_answer`. Practical for `b ≈ 6..12`. |
 
 ## `signers/` directory contents
 
@@ -58,6 +60,14 @@ directory), and thin Python drivers/reference signers under `script/`.
   the Python signer; `make_kat_fixture.py` writes the Forge KAT fixture;
   `tier_model.py` is the sphincs-art tier cost model. See its `README.md` and
   spec §14. Build: `cd signers/leansphincs23-keccak && cargo build --release`.
+- **`leansphincs-s-keccak/`** — Rust crate for leanSphincs-S over keccak256
+  (`h=26,d=1,k=13,a=12`, WOTS+C `T=128` over the 26 FORS tops, no FORS key
+  hash; 4,164-B sig). Bin `lssk`, with `ls23k`'s subcommands and tiers (Full is
+  the whole `2^26` tree). Its key files are not `ls23k`'s, and a seed must never
+  serve both schemes. `crosscheck.py`, `make_kat_fixture.py` and `tier_model.py`
+  as for leanSphincs-23 (the model in both keccak calls and Keccak-f
+  permutations). See its `README.md` and spec §14. Build:
+  `cd signers/leansphincs-s-keccak && cargo build --release`.
 
 ## Cross-validation map
 
@@ -74,11 +84,17 @@ directory), and thin Python drivers/reference signers under `script/`.
   The tiered `sign-key` is held to `ls23k sign` byte for byte (the crate's
   tests, the Forge FFI test `testVerifyFFI_RustLightTierKeyFile`, CI), and its
   call counts to `tier_model.py`.
+- **leanSphincs-S**: `signers/leansphincs-s-keccak/crosscheck.py` (Rust ↔
+  Python, plus a spec-literal third recomputation), the Python signer's
+  `--upstream-kat` (the upstream keccak branch's `known_answer` at its own
+  parameters), and the Forge KAT fixture
+  `test/fixtures/leansphincs-s-keccak-kat.json` (`make_kat_fixture.py --check`).
+  `sign-key` is held to `lssk sign` as for leanSphincs-23.
 
 CI (`.github/workflows/ci.yml`) runs the fast cross-checks (`rust-signer`, and
-`slh-crosscheck` / `noble-crosscheck` at reduced parameters; `leansphincs23` at
-full parameters on pruned keys), the full forge suite (`solidity`) and the
-frozen `legacy/` suites (`legacy-verifiers`) on every push to `main` and on
-every pull request.
+`slh-crosscheck` / `noble-crosscheck` at reduced parameters; `leansphincs23` and
+`leansphincs-s` at full parameters on pruned keys), the full forge suite
+(`solidity`) and the frozen `legacy/` suites (`legacy-verifiers`) on every push
+to `main` and on every pull request.
 
 > **Not audited, not production-safe.**

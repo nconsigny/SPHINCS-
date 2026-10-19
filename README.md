@@ -141,6 +141,65 @@ Operational rules:
 - **The key file is the secret.** It holds the seed in the clear (mode 0600): back it up like a private key. `keygen` reads the seed only from `--seed-file` (refused if group or others can access it) or `--seed-stdin`, never from the command line.
 - **Same signatures, same verifier.** `sign-key` prints exactly what the stateless `ls23k sign <seed> <b> <msg>` prints (Rust tests, the Forge FFI test `testVerifyFFI_RustLightTierKeyFile` and CI check this), so `LeanSphincs-23Asm.sol`, the spec's encoding and the KAT fixture are unchanged. Nothing counts signatures: staying under the rated lifetime is the caller's job.
 
+## leanSphincs-S (keccak256)
+
+`src/keccak/LeanSphincs-SAsm.sol` verifies **leanSphincs-S**, the [sphincs-art](https://nconsigny.github.io/sphincs-art/) set that leanSphincs-23 became with one more tree level (`h = 25 → 26`), built the way the upstream crate's [`keccak` branch](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates/tree/keccak/crates/sphincs) builds leanSphincs: Ethereum Keccak-256, the same 16-byte tweak, and **no FORS key hash** (the WOTS+C encoding absorbs the 26 FORS tops, then the counter). Spec: [docs/leanSphincs-S-keccak.md](docs/leanSphincs-S-keccak.md) (§5 pins the `a = 12` digest layout, as for leanSphincs-23).
+
+It differs from leanSphincs-23 in exactly two ways: `h = 26` (one more auth-path node, a 4,164-byte signature, leaf index `word_3 & (2^26 − 1)`), and the merged encoding `d = Th(P, address(ENC, 0, 0, e), tops ‖ LE32(c))`, a 452-byte input. Everything else (tweak, `P`, secrets, digest layout, FORS positions, serialization, surrogates, randomizer grind, key file, cache plans) is leanSphincs-23's. Verification is a constant **249 keccak256 calls, or 259 Keccak-f permutations**, the sphincs-art figure (a call over `L` bytes is `⌊L/136⌋ + 1` permutations). The interface is the C-series `verify(pkSeed, pkRoot, message, sig)`, so `SphincsAccount` takes it unchanged (`test/SphincsAccountLeanSphincsSTest.t.sol`).
+
+| | **leanSphincs-S (keccak)** | leanSphincs-23 (keccak) | C13 | SLH-DSA-SHA2-128-24 |
+|---|---|---|---|---|
+| h / d | 26 / 1 | 25 / 1 | 22 / 2 | 22 / 1 |
+| Few-time layer | FORS, k=13, a=12, no FORS key | FORS, k=13, a=12, FORS key | FORS+C, k=7, a=19 | FORS, k=6, a=24 |
+| One-time layer | WOTS+C, w=4, 64 chains, T=128, signs the 26 FORS tops | WOTS+C, w=4, 64 chains, T=128, signs the FORS key | WOTS+C, w=8, 43 chains | WOTS+, w=4, 68 chains |
+| Sig | 4,164 B | 4,148 B | 3,688 B | 3,856 B |
+| Verify hashes | 249 keccak256 = **259 Keccak-f** | 249 keccak256 = 259 Keccak-f | - | 296 SHA-256 compressions (page) |
+| Verify gas | **~39 K** (38,935–39,052) | ~39 K (38,879–39,002) | 105 K | ~142 K |
+| Lifetime | 2²⁶ full key / 2²¹ standard / 20 K light | 2²³ full key / 2²¹ standard / 20 K light | 2²² cap | 2²⁴ usage cap |
+
+- **Verify gas** is the `verify` call frame (`vm.lastCallGas`), as for leanSphincs-23: 38,935–39,052 over the six KAT vectors, 39,027 for a fresh `lssk sign` signature, 39,095 for a Light-tier key-file signature. The hash work is constant, and the gas depends only on the WOTS chain step counts: any admissible signature lies in 38,441–39,470, 75 above leanSphincs-23's range (one more path node and the 452-byte encoding input, net of the dropped FORS key hash). The tests gate the frame at 39,670. A `gasleft()` delta around the external call is 40.4–40.5 K (the call's account access and the caller's ABI encoding of the 4,164-byte argument). `SphincsAccount.validateUserOp` (ECDSA + leanSphincs-S) is 46.4–46.5 K, 49.0 K on the first, cold call. C13 and SLH-DSA are the pure-assembly figures from the Variants table. leanSphincs-23's 259 permutations are counted the same way (its 448-byte FORS key input takes 4, its 52-byte encoding 1).
+- **Lifetime** figures are sphincs-art's one-signer estimates for leanSphincs-S (not proved in Lean): **103 M** for a full `2^26` key, rated **2²⁶**; **2.87 M** for the "standard" `2^20` subtree, rated **2²¹**; **38.2 K** for the "light" (Ledger Nano S+) `2^13` subtree, rated **20 K**. The page's per-device design targets still give 2²³ for the full key; spec §14 explains the rating.
+- **Keygen** is `≈ 2^b · 226` keccak calls (`2^b · 233` permutations): 1.85 M (`b = 13`), 237 M (`b = 20`), 1.52·10¹⁰ (full key, 15.6 B permutations), twice leanSphincs-23's full key.
+- **Signing** costs about 148 K keccak calls plus `2^(26−b)` randomizer tries and the auth path: 133 K to rebuild the 13 FORS trees of the signed instance and about 14.7 K WOTS+C counter tries. A counter try is one permutation: the signer absorbs the encoding's three fixed blocks once per signature.
+
+```bash
+cd signers/leansphincs-s-keccak && cargo build --release && cargo test --release
+./target/release/lssk sign <seed_hex64> <b> <msg_hex64>   # 0x ‖ abi.encode(pkSeed, pkRoot, sig); b = kept subtree height
+cd ../.. && python3 signers/leansphincs-s-keccak/crosscheck.py --jobs 4   # Rust ↔ Python, byte for byte
+python3 script/leansphincs_s_signer.py --upstream-kat   # the upstream keccak branch's known_answer, at its own parameters
+forge test --match-contract LeanSphincsS -vv   # verifier + SphincsAccount suites (KATs, tampering, spec model, random digests, FFI)
+```
+
+The Rust signer (`signers/leansphincs-s-keccak`, CLI `lssk`) is a port of the upstream crate's `keccak` branch, by way of the leanSphincs-23 crate, whose tiers, key file and CLI it keeps. `script/leansphincs_s_signer.py` is an independent Python signer written from the spec. Its `--upstream-kat` mode runs the same code at upstream's own parameters (`h = 26, a = 10, k = 24, T = 120`) and reproduces the branch's `known_answer` test byte for byte (public key `63b1…cd00`, `keccak256(sig)` `9a21…f94d`, counter 1,176). The crosscheck holds the two signers to byte equality. The Forge KAT fixture `test/fixtures/leansphincs-s-keccak-kat.json` is regenerated by `signers/leansphincs-s-keccak/make_kat_fixture.py`, and CI job `leansphincs-s` runs all of the above.
+
+### Tiered signer
+
+`lssk keygen` generates a key once for one of the "One signer, leanSphincs-S" tiers of the [sphincs-art page](https://nconsigny.github.io/sphincs-art/) and writes it to a key file with a node cache of bounded size. `lssk sign-key` then recomputes only the auth-path nodes the cache does not hold. Spec §14; CLI, cache plans and key-file layout in the [crate README](signers/leansphincs-s-keccak/README.md).
+
+```bash
+./target/release/lssk keygen --seed-file seed.hex --tier light -o light.lssk   # or --seed-stdin; --tier standard|full, or --b N --cache-bytes N
+./target/release/lssk sign-key light.lssk <msg_hex64>                          # the bytes `lssk sign <seed> 13 <msg>` prints
+./target/release/lssk info light.lssk                                          # tier, plan, key words, costs; no secret
+```
+
+| Tier | `b` / cache (plan) | Keygen: keccak256 calls / Keccak-f, time | Sign: calls / Keccak-f (mean), time | Peak RSS, keygen / sign | Lifetime, page estimate (rated) | Page, Keccak-f: keygen / sign |
+|---|---|---|---|---|---|---|
+| Light | 13 / 16 KiB (level 3) | 1.85 M / 1.91 M, 0.13 s | 160 K / 160 K, 13–32 ms | 2.7 / 4.5–4.9 MB | 38.2 K (20 K) | 1.91 M, 5.5 min / 159 K, 27 s |
+| Standard | 20 / 1 MiB (levels 5..20) | 237 M / 244 M, 13.6 s | 153 K / 153 K, 20–32 ms | 2.8 / 5.4–5.9 MB | 2.87 M (2²¹) | 244 M, 1.9 s / 155 K, 1.2 ms |
+| Full | 26 / 16 MiB (levels 7..26) | 15.2 B / 15.6 B, ≈ 14.5 min\* | 177 K / 178 K (model), not run | ≈ 16 MiB / 19 MB\* | 103 M (2²⁶) | 15.6 B, 31 s / 178 K, 0.35 ms |
+
+- **Times** are this machine's (Ryzen 9 9955HX3D, 16C/32T), with `lssk` pinned to 8 physical cores (`taskset -c 0-7`, `--threads 8`) while other tenants kept the load average at 25–37, so they are upper bounds. Call and permutation counts are exact. Keygen is `2^b·226 + 2(26 − b)` calls and `2^b·233 + 2(26 − b)` permutations, one under the page's model. The Standard keygen ran at 17.4 M calls/s (17.9 M permutations/s), 2.2 M calls/s per core; a single-threaded `b = 16` keygen ran at 3.9 M calls/s. A signature's time is one `sign-key` run, which also loads and checks the key file (1,050 / 32,780 calls) and verifies the signature (249 calls, 259 permutations) before printing it. The signing means are measured: 24 signatures (Light) averaged 159.8 K calls and 159.9 K permutations, 12 (Standard) 152.6 K and 152.8 K, around the reference signer's expected 159.0 K and 155.2 K (the page's model plus 13 calls). The grinds are geometric, so single signatures ranged over 140–197 K calls.
+- \***Full was not run.** Its keygen time is an extrapolation from the measured Standard keygen rate on the same 8 cores (`15,166,603,264 / 17.4 M` calls/s ≈ 871 s; ≈ 8 min at eight times the single-threaded rate). Its memory is the crate's heap accounting (about 16 MiB for keygen, 19.3 MB for `sign-key`, plus about 3 MB for the process), and its signing figures are the model's (the reference signer's mean, 176.9 K calls, is the model plus 14).
+- **Peak RSS** is `VmHWM` (`LSSK_RSS=1`), a lower bound.
+- **Page** figures are sphincs-art's (default "vanilla" view) for the Keccak-256 instantiation: Keccak-f permutations, and times at its device rates (Ledger Nano S+ 5.8 K/s, weak CPU 128 M/s, powerful CPU 512 M/s). The lifetime is the page's estimate (not proved): the cover estimate lowered by the gap the proposal's Lean proofs show at the same subtree size.
+
+Operational rules:
+
+- **One seed, one key.** Never use a seed at two different `b` (two tiers, or `keygen` and `lssk sign` at another `b`). Same-seed keys share `P` and every one-time key, and where their kept subtrees overlap a signature of one converts into a signature of the other from public data alone. Use a fresh seed for every key.
+- **One seed, one scheme.** Never reuse a seed across leanSphincs-23 and leanSphincs-S. The two derive the same `P` and the same one-time keys from it, and sign a different encoding with each of them (a FORS key there, the FORS tops here), which breaks their one-time security. The key files cannot be confused (each CLI refuses the other's), but the seed is the same 32 bytes.
+- **The key file is the secret.** It holds the seed in the clear (mode 0600): back it up like a private key. `keygen` reads the seed only from `--seed-file` (refused if group or others can access it) or `--seed-stdin`, never from the command line.
+- **Same signatures, same verifier.** `sign-key` prints exactly what the stateless `lssk sign <seed> <b> <msg>` prints (Rust tests, the Forge FFI test `testVerifyFFI_RustLightTierKeyFile` and CI check this), so `LeanSphincs-SAsm.sol`, the spec's encoding and the KAT fixture are unchanged. Nothing counts signatures: staying under the rated lifetime is the caller's job.
+
 ## Stateless SPHINCs- Architecture
 
 ### Shared hash kernel
@@ -156,7 +215,7 @@ Live verifiers in `src/` are organized **one folder per hash function**: `src/ke
 | **FIPS ADRSc 22 B** (`src/sha/`) | C11-SHA, C13-SHA, C12-SHA, SLH-DSA-SHA2-128-24 | `layer1 ‖ tree8 ‖ type1 ‖ 12 B type-dependent` | SHA-256 (precompile 0x02) | `PK.seed(16) ‖ zeros(48) ‖ ADRSc(22) ‖ payload` |
 | _JARDIN 32 B (retired → `legacy/`)_ | SLH-DSA-Keccak-128-24; legacy C11/C12 originals | `layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
 
-leanSphincs-23 (`src/keccak/LeanSphincs-23Asm.sol`) is not in this table: it is not a SPHINCS+ ADRS scheme, and it keeps leanSphincs's own 16-byte tweak with input `P(16) ‖ tweak(16) ‖ payload` (see [leanSphincs-23](#leansphincs-23-keccak256)).
+leanSphincs-23 and leanSphincs-S (`src/keccak/LeanSphincs-23Asm.sol`, `src/keccak/LeanSphincs-SAsm.sol`) are not in this table: they are not SPHINCS+ ADRS schemes, and they keep leanSphincs's own 16-byte tweak with input `P(16) ‖ tweak(16) ‖ payload` (see [leanSphincs-23](#leansphincs-23-keccak256) and [leanSphincs-S](#leansphincs-s-keccak256)).
 
 ### SHA-256 twins (`src/sha/`)
 
@@ -262,6 +321,8 @@ SPHINCs- and ECDSA are derived through independent paths - compromising one does
 | `signers/jardin-keccak-128-24/` | C (sphincsplus fork + custom keccak + 32-B ADRS) | SLH-DSA-Keccak-128-24 | No |
 | `signers/leansphincs23-keccak/` (`ls23k`) | Rust (port of the upstream leanSphincs crate) | leanSphincs-23 (keccak) | No, seed fed in |
 | `script/leansphincs23_signer.py` | Python (independent, from the spec; `b ≈ 6..12`) | leanSphincs-23 (keccak) | No |
+| `signers/leansphincs-s-keccak/` (`lssk`) | Rust (port of the upstream crate's `keccak` branch) | leanSphincs-S (keccak) | No, seed fed in |
+| `script/leansphincs_s_signer.py` | Python (independent, from the spec; `b ≈ 6..12`) | leanSphincs-S (keccak) | No |
 
 ```bash
 # Rust WASM C-series signer
@@ -381,6 +442,7 @@ forge test --match-contract SLH_DSA_Keccak_128_24_Test -vv
 ```bash
 forge test
 (cd signers/leansphincs23-keccak && cargo test --release)
+(cd signers/leansphincs-s-keccak && cargo test --release)
 cd signers/signer-wasm && cargo test --release -- --ignored
 ```
 

@@ -10,6 +10,8 @@ name: CI
 #   - leanSphincs-23-keccak Rust↔Python signer desync, a KAT fixture the sources no
 #     longer reproduce, and verifier regressions (KATs, tampering, gas ceiling) — via
 #     cargo test, crosscheck.py, make_kat_fixture.py --check and forge test;
+#   - the same for leanSphincs-S-keccak, plus the Python signer's reproduction of the
+#     upstream keccak branch's known_answer (leansphincs-s);
 #   - the frozen legacy/ verifiers, which live outside the default forge test path
 #     and so need an explicit job to be built and run at all.
 
@@ -59,6 +61,9 @@ jobs:
         run: make -C signers/sphincsplus-128-24
       - name: Build leanSphincs-23 Rust signer CLI (ls23k, for the LeanSphincs23 FFI tests)
         working-directory: signers/leansphincs23-keccak
+        run: cargo build --release
+      - name: Build leanSphincs-S Rust signer CLI (lssk, for the LeanSphincsS FFI tests)
+        working-directory: signers/leansphincs-s-keccak
         run: cargo build --release
       - name: forge build
         run: forge build
@@ -164,6 +169,89 @@ jobs:
           EOF
       - name: forge test (KATs, tampering, spec model, random digests, verify-frame gas ceiling, 4337 account, ls23k FFI round-trips)
         run: forge test --match-contract LeanSphincs23Test -vv
+
+  # ── leanSphincs-S over keccak256 (src/keccak/LeanSphincs-SAsm.sol; signer
+  #    signers/leansphincs-s-keccak, a Rust port of the upstream crate's keccak branch:
+  #    h = 26, no FORS key hash). Mirrors leansphincs23: unit tests in release and in the
+  #    debug test profile (overflow checks on); the byte-for-byte Rust↔Python crosscheck
+  #    on 16 pruned-key vectors, with its spec-literal third opinion; the Python signer's
+  #    reproduction of the upstream keccak branch's known_answer at that branch's own
+  #    parameters; the Forge KAT fixture, which must still be exactly what the current
+  #    sources produce; and the verifier's Forge suites (the --match-contract regex also
+  #    selects SphincsAccountLeanSphincsSTest). The tiered signer: a Light-tier key file
+  #    (keygen, seed on stdin) must sign exactly what the stateless `lssk sign` signs,
+  #    and `lssk info` must agree with the cost model tier_model.py, in keccak256 calls
+  #    and in Keccak-f permutations; no Standard or Full keygen here. lssk is built
+  #    first: under CI the three Forge FFI tests fail rather than skip when it is missing,
+  #    and every consumer refuses a binary older than the crate sources. The solidity
+  #    job runs the same Forge suites again inside the full forge test. ──
+  leansphincs-s:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python deps
+        run: pip install pycryptodome eth-abi
+      - name: Build leanSphincs-S Rust signer CLI (lssk, for the crosscheck and the Forge FFI tests)
+        working-directory: signers/leansphincs-s-keccak
+        run: cargo build --release
+      - name: cargo test --release
+        working-directory: signers/leansphincs-s-keccak
+        run: cargo test --release
+      - name: cargo test (debug assertions and overflow checks on)
+        working-directory: signers/leansphincs-s-keccak
+        run: cargo test
+      - name: Rust vs Python crosscheck (byte for byte, plus the spec-literal recomputation)
+        run: python3 signers/leansphincs-s-keccak/crosscheck.py --jobs 4
+      - name: Python signer reproduces the upstream keccak branch's known_answer (at its own parameters)
+        run: python3 script/leansphincs_s_signer.py --upstream-kat
+      - name: KAT fixture is what the sources produce
+        run: python3 signers/leansphincs-s-keccak/make_kat_fixture.py --check
+      - name: Tiered signer (Light keygen, seed on stdin; sign-key == sign; lssk info vs tier_model.py)
+        run: |
+          lssk=signers/leansphincs-s-keccak/target/release/lssk
+          seed=0x$(printf 'a5%.0s' $(seq 32))
+          msg=0x$(printf '11%.0s' $(seq 32))
+          d=$(mktemp -d)
+          printf '%s\n' "$seed" | "$lssk" keygen --seed-stdin --tier light -o "$d/light.lssk" > "$d/keygen.out"
+          "$lssk" sign-key "$d/light.lssk" "$msg" > "$d/sign-key.out"
+          "$lssk" sign "$seed" 13 "$msg" > "$d/sign.out"
+          cmp "$d/sign-key.out" "$d/sign.out"
+          "$lssk" info "$d/light.lssk" > "$d/info.json"
+          python3 signers/leansphincs-s-keccak/tier_model.py --check
+          python3 signers/leansphincs-s-keccak/tier_model.py --json > "$d/model.json"
+          python3 - "$d" <<'EOF'
+          import json, os, sys
+          d = sys.argv[1]
+          info = json.load(open(f"{d}/info.json"))
+          model = json.load(open(f"{d}/model.json"))
+          keygen = open(f"{d}/keygen.out").read().strip()
+          sig = open(f"{d}/sign.out").read().strip()
+          assert os.stat(f"{d}/light.lssk").st_mode & 0o777 == 0o600, "key file mode"
+          assert keygen == "0x" + info["pkSeed"][2:] + info["pkRoot"][2:] and sig.startswith(keygen), "key words"
+          assert model["verify"] == {"calls": 249, "permutations": 259}
+          assert [t["b"] for t in model["tiers"]] == [13, 20, 26]
+          assert all(t["lifetime"]["target_ok"] for t in model["tiers"]), "lifetime targets"
+          # Full is rated at 2^26 (spec section 14): the cover estimate must clear that by the model's margin too.
+          full = model["tiers"][2]
+          assert full["lifetime"]["estimate"] >= model["lifetime_model"]["margin"] * 2**26, "full tier rating"
+          light = model["tiers"][0]
+          assert (info["tier"], info["b"], info["plan"], info["cache_nodes"]) == (
+              "light", light["b"], light["plan"]["levels"], light["plan"]["nodes"]), "plan"
+          assert info["auth_path_calls"] == light["tree_cost"]["calls"] == 2830, "auth path calls"
+          assert info["auth_path_permutations"] == light["tree_cost"]["permutations"] == 2886, "auth path permutations"
+          # The model counts 2^b nodes in the kept subtree, which has 2^b - 1.
+          assert info["keygen_calls"] == light["keygen"]["calls"] - 1 == 1851418, "keygen calls"
+          assert info["keygen_permutations"] == light["keygen"]["permutations"] - 1 == 1908762, "keygen permutations"
+          print("light tier: sign-key == sign; info matches tier_model.py")
+          EOF
+      - name: forge test (KATs, tampering, spec model, random digests, verify-frame gas ceiling, 4337 account, lssk FFI round-trips)
+        run: forge test --match-contract LeanSphincsS -vv
 
   # ── Frozen legacy/ verifiers. These sit OUTSIDE the default `forge test` path
   #    (Foundry only scans test/), so they need an explicit job to be covered.
