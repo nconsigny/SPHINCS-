@@ -33,6 +33,10 @@ directory), and thin Python drivers/reference signers under `script/`.
 | ″ | `leansphincs23_signer.py` | Python | `script/` | Independent, written from `legacy/docs/leanSphincs-23-keccak.md`. Practical for `b ≈ 6..12`. |
 | **leanSphincs-S** (`src/keccak/LeanSphincs-SAsm.sol`, keccak) | `lssk` | Rust | `signers/leansphincs-s-keccak/` | Port of the upstream crate's `keccak` branch (h=26, no FORS key hash), by way of `ls23k`, whose tiers, key file and CLI it keeps. Counts keccak calls and Keccak-f permutations. Fast path for the forge FFI tests and the KAT fixture. |
 | ″ | `leansphincs_s_signer.py` | Python | `script/` | Independent, written from `docs/leanSphincs-S-keccak.md`; `--upstream-kat` reproduces the upstream keccak branch's `known_answer`. Practical for `b ≈ 6..12`. |
+| **leanSphincs-f** (`src/keccak/LeanSphincs-FAsm.sol`, keccak) | `lsfk` | Rust | `signers/leansphincs-f-keccak/` | leanSphincs-S re-parameterized to `a = 9`, `k = 20`, `T = 122` (one-call digest, seven 9-bit indices per word; 4,660-B sig), by way of `lssk`, whose tiers, key-file layout and CLI it keeps (magic `LS-FKKEY`). Fast path for the forge FFI tests and the KAT fixture. |
+| ″ | `leansphincs_s_signer.py --variant f` | Python | `script/` | The same independent signer at the f parameters, written from `docs/leanSphincs-f-keccak.md`. Practical for `b ≈ 6..12`. |
+| **leanSphincs** (`src/keccak/LeanSphincsAsm.sol`, keccak) | `lsk` | Rust | `signers/leansphincs-keccak/` | The upstream crate's `keccak` branch at its own parameters (`a = 10`, `k = 24`, `T = 120`, two-call digest; 5,684-B sig); its `known_answer` passes unchanged. Tiers, key-file layout and CLI as `lssk` (magic `LS-KKKEY`). Fast path for the forge FFI tests and the KAT fixture. |
+| ″ | `leansphincs_s_signer.py --variant regular` | Python | `script/` | The same independent signer at the upstream parameters (`docs/leanSphincs-keccak.md`); reproduces upstream's `known_answer` (also via `--upstream-kat`). Practical for `b ≈ 6..12`. |
 
 ## `signers/` directory contents
 
@@ -69,6 +73,24 @@ directory), and thin Python drivers/reference signers under `script/`.
   as for leanSphincs-23 (the model in both keccak calls and Keccak-f
   permutations). See its `README.md` and spec §14. Build:
   `cd signers/leansphincs-s-keccak && cargo build --release`.
+- **`leansphincs-f-keccak/`** — Rust crate for leanSphincs-f over keccak256
+  (`h=26,d=1,k=20,a=9`, WOTS+C `T=122` over the 40 FORS tops; 4,660-B sig). Bin
+  `lsfk`, with `lssk`'s subcommands, tiers and tooling (`crosscheck.py`,
+  `make_kat_fixture.py`, `tier_model.py`). See its `README.md` and
+  `docs/leanSphincs-f-keccak.md`. Build:
+  `cd signers/leansphincs-f-keccak && cargo build --release`.
+- **`leansphincs-keccak/`** — Rust crate for leanSphincs over keccak256, the
+  upstream keccak branch at its own parameters (`h=26,d=1,k=24,a=10`, WOTS+C
+  `T=120` over the 48 FORS tops, two-call digest; 5,684-B sig). Bin `lsk`, with
+  `lssk`'s subcommands, tiers and tooling; its `tier_model.py` quotes the
+  proposal's Lean-proved lifetimes. See its `README.md` and
+  `docs/leanSphincs-keccak.md`. Build:
+  `cd signers/leansphincs-keccak && cargo build --release`.
+
+Each leanSphincs CLI (`ls23k`, `lssk`, `lsfk`, `lsk`) has its own key-file
+magic and refuses the others' key files. They all derive the same one-time keys
+from a seed, so one seed is one key of one variant: never reuse a seed across
+variants or tiers.
 
 ## Cross-validation map
 
@@ -91,11 +113,19 @@ directory), and thin Python drivers/reference signers under `script/`.
   parameters), and the Forge KAT fixture
   `test/fixtures/leansphincs-s-keccak-kat.json` (`make_kat_fixture.py --check`).
   `sign-key` is held to `lssk sign` as for leanSphincs-23.
+- **leanSphincs-f** / **leanSphincs**: the same, per crate
+  (`signers/leansphincs-f-keccak/crosscheck.py` against `--variant f`,
+  `signers/leansphincs-keccak/crosscheck.py` against `--variant regular`), the
+  Forge KAT fixtures `test/fixtures/leansphincs-f-keccak-kat.json` and
+  `test/fixtures/leansphincs-keccak-kat.json`, and `sign-key` held to `lsfk sign`
+  / `lsk sign`. For leanSphincs, both `lsk` and the Python signer also reproduce
+  the upstream `known_answer` (pk `63b1…cd00`, `keccak256(sig)` `9a21…f94d`,
+  counter 1176).
 
 CI (`.github/workflows/ci.yml`) runs the fast cross-checks (`rust-signer`, and
-`slh-crosscheck` / `noble-crosscheck` at reduced parameters; `leansphincs23` and
-`leansphincs-s` at full parameters on pruned keys), the full forge suite
-(`solidity`) and the frozen `legacy/` suites (`legacy-verifiers`) on every push
-to `main` and on every pull request.
+`slh-crosscheck` / `noble-crosscheck` at reduced parameters; `leansphincs23`,
+`leansphincs-s`, `leansphincs-f` and `leansphincs` at full parameters on pruned
+keys), the full forge suite (`solidity`) and the frozen `legacy/` suites
+(`legacy-verifiers`) on every push to `main` and on every pull request.
 
 > **Not audited, not production-safe.**

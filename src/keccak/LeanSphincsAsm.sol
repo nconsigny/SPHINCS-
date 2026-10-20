@@ -1,0 +1,849 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: 2026 Nicolas Consigny <nicolas@ethereum.org>
+
+pragma solidity ^0.8.28;
+
+/// @title LeanSphincsAsm — Stateless leanSphincs verifier over keccak256 (shared, Yul)
+/// @notice leanSphincs: one XMSS layer h=26 (d=1), FORS k=24 a=10 (no tree roots: the two
+///         top nodes of each tree), WOTS+C v=64 chains of 4 positions (w=2 bits), target sum
+///         T=120, n=16, sig=5684 B. Spec: docs/leanSphincs-keccak.md, which is
+///         docs/leanSphincs-S-keccak.md except for the rows of its differences table; "spec
+///         §N" below is a section of the leanSphincs-S spec, as amended by that table.
+///         The upstream leanSphincs crate's keccak branch (Tom Wambsgans, crates/sphincs on
+///         branch `keccak`: Keccak-256 and no FORS key hash, the WOTS+C encoding absorbs the
+///         FORS tops) at its own parameters, with nothing re-parameterized: that crate is
+///         normative, and "upstream" below names its functions. Derived from
+///         LeanSphincs-SAsm.sol; the differences are upstream's two-call digest (section 1),
+///         the FORS shape (24 trees of 9 hashed levels, six 10-bit indices per digest word),
+///         the 768 bytes of tops in the encoding (section 3), T = 120, and the signature
+///         offsets that follow from them.
+/// @dev    Tweakable hash (spec §2):
+///           Th(P, tw, M) = keccak256(P ‖ address(tw) ‖ M)[0:16]   — the HIGH 128 bits
+///         `P ‖ address` is exactly one EVM word, so the hash input is that word with the
+///         payload right after it. The message digest alone keeps all 32 output bytes.
+///
+///         Address (spec §3). This is leanSphincs' own 16-byte tweak, NOT a SPHINCS+ /
+///         FIPS 205 ADRS (the repo's FIPS-ADRS rule covers the C-series / SPX family only):
+///           bytes 0..4   lo              u32 little endian
+///           bytes 4..7   hi              low 3 bytes, little endian (hi < 2^24)
+///           byte  7      t | step << 5   (t < 32, step < 8)
+///           bytes 8..16  zero
+///         The verifier stores `P ‖ address` 8 bytes early (HASH WINDOW in the body): the
+///         stored prefix word is `0^8 ‖ P ‖ address bytes 0..7`, so in it (bit 0 = least
+///         significant):
+///           bits 32..63   lo, byte k of lo at bits 56-8k .. 63-8k
+///           bits  8..31   hi, byte k of hi at bits 24-8k .. 31-8k
+///           bits  0.. 7   t | step << 5
+///         Upstream test vector: address(t=10, step=5, hi=0x123456, lo=0x89abcdef) =
+///         ef cd ab 89 56 34 12 aa 00 … 00, i.e. the low 64 bits 0xefcdab89_563412_aa.
+///
+///         Tweak types used by verification (t, hi, lo):
+///            1 CHAIN     (chain i, leaf e; step = target position - 1)
+///            2 LEAF      (0, e)                 3 NODE    (level, node index)
+///            4 ENC       (0, e)                 9 FTS_LEAF, 10 FTS_NODE (pos(κ,ℓ,j), idx)
+///           12 MSG       (c, 0)                 the digest's call number c = 0, 1
+///         with e = idx (the one-time key signs at the digest's leaf) and
+///         pos(κ,ℓ,j) = κ + 32ℓ + 512j (spec §4 at a = 10: κ < 24, ℓ ≤ 9, j < 2^10, upstream's
+///         fors_position bound; disjoint bit fields, pos < 2^19). Type 11 (leanSphincs-23's
+///         FTS_KEY) is unused: there is no FORS key hash (spec §7).
+///
+///         Signature layout (spec §11 at this spec's offsets, upstream Signature::to_bytes,
+///         5684 B). Fields after the 4-byte counter are not 16-aligned; calldataload /
+///         calldatacopy do not care. A 32-byte read of a 16-byte field also picks up the next
+///         16 bytes, which never reach a hash input (see MASKING in the body):
+///              0                  ρ (randomizer)
+///             16 + 176κ           FORS secret sk_κ          κ = 0..23
+///             32 + 176κ + 16ℓ     FORS path p_κ[ℓ]          ℓ = 0..9
+///           4240                  counter c, u32 LE (4 B)
+///           4244 + 16i            WOTS value σ_i            i = 0..63
+///           5268 + 16ℓ            XMSS auth path[ℓ]         ℓ = 0..25
+///
+///         Work: keccak256 calls on every input that reaches the root comparison (constant —
+///         the WOTS+C target sum fixes the number of chain steps at 64·3 - T), and the
+///         Keccak-f permutations they cost (a call over L input bytes costs ⌊L/136⌋ + 1):
+///                                         calls   input bytes   permutations
+///           message digest (2 calls)        2        80              2
+///           FORS leaves                    24        48             24
+///           FORS nodes  (24 trees · 9)    216        64            216
+///           WOTS+C encoding                 1       804              6
+///           WOTS chain steps (192 - 120)   72        48             72
+///           WOTS leaf                       1      1056              8
+///           XMSS path nodes                26        64             26
+///           total                         342                      354
+///         354 is upstream's VERIFY_PERMUTATIONS (lib.rs) and the sphincs-art Keccak-256
+///         figure for leanSphincs. Against leanSphincs-S's 249 / 259: one more digest call,
+///         84 more FORS calls (24·10 against 13·12), 8 more chain steps (T = 120 against
+///         128), and two more permutations for the 804-byte encoding input (5·136 = 680 <
+///         804 < 816 = 6·136). An inadmissible counter returns false after the first 243
+///         calls (digests, FORS, encoding).
+///         The keccak256 count is constant; the gas is not: the chain dispatch (section 4)
+///         costs more for some step counts than for others, and nothing else depends on the
+///         signature. Typical signatures differ by a few hundred gas; the extremes over all
+///         admissible codewords are about 1,100 apart (52,246..53,342 in the verifier's own
+///         call frame, forge 1.5.1, solc 0.8.33, via-IR; see VERIFY_GAS_MAX in
+///         test/LeanSphincsTest.t.sol). Every input is public, so this leaks nothing.
+///
+///         Loop structure: the 9 FORS levels and the 26 XMSS levels are unrolled, so every
+///         shift, mask, address constant and calldata offset in them is a literal; the 24
+///         FORS trees are a loop; the 64 WOTS chains are a loop unrolled by 4 (one
+///         codeword byte per iteration).
+///
+///         Memory map (bytes). Small hashes read keccak256(0x08, 0x20 + payload length):
+///           0x000  0^8 ‖ P ‖ address[0..8]   prefix word; the window starts at 0x008
+///           0x020  0^8                       address[8..16], zeroed once
+///           0x028  payload                   m ‖ ρ (48 B) for both digest calls; sk_κ,
+///                                            a node pair L ‖ R, or a chain value
+///         The wide hashes (ENC, LEAF) read keccak256(0x68, 0x20 + payload length):
+///           0x060  0^8 ‖ P ‖ address[0..8]
+///           0x080  0^8                       zeroed once
+///           0x088  24 packed FORS top words (768 B, to 0x387) and the counter (4 B,
+///                  0x388..0x38B) for ENC, then reused for the 64 WOTS chain ends
+///                  (1024 B, to 0x487) for LEAF
+///         The highest byte written is 0x497 (end_63's stray low half). The FORS loop
+///         writes no higher than 0x397 (tree 23's stray low half, see MASKING), inside the
+///         LEAF payload, which the chain ends rewrite before the LEAF hash reads it.
+contract LeanSphincsAsm {
+
+    function verify(bytes32 pkSeed, bytes32 pkRoot, bytes32 message, bytes calldata sig)
+        external pure returns (bool valid)
+    {
+        // NOTE: this block intentionally uses Solidity's free-memory-pointer slot
+        // (0x40) and the zero slot (0x60) as scratch and writes high memory (up to
+        // 0x497) without updating the FMP. That is only sound because every exit
+        // below is an unconditional in-assembly `return`/`revert`, so Solidity never
+        // regains control with a clobbered FMP. It is therefore NOT `memory-safe` in
+        // the Yul sense — do not add the ("memory-safe") annotation and do not
+        // introduce a normal (fall-through) exit from this block. (Same reasoning as
+        // SphincsC13Asm, review C13-evm-f1.)
+        assembly {
+            // HASH WINDOW. A hash input `P ‖ address ‖ payload` does not start at a word
+            // boundary: it starts 8 bytes into its prefix word. The word stored at 0x00 is
+            //   0^8 ‖ P ‖ address bytes 0..7          (word bytes 0..7, 8..23, 24..31)
+            // so the address's nonzero half (lo, hi, t|step) is the LOW 64 bits of the
+            // stored word and every field constant is a short PUSH (in the high half they
+            // would be wide constants, which the optimizer splits into PUSH+SHL pairs).
+            // The address's zero half (bytes 8..15) is memory 0x20..0x27, which is zeroed
+            // once and never written again, and the payload starts at 0x28. The wide
+            // hashes (ENC, LEAF) use the same shape 0x60 higher: prefix word at 0x60,
+            // zero bytes 0x80..0x87, payload from 0x88. The small window never reads past
+            // 0x57 (its longest input is the digest's 0x50 bytes from 0x08) and the wide one
+            // never reads below 0x68.
+
+            // MASKING. A 16-byte value arrives in a 32-byte word whose low half is not zero:
+            // a calldataload carries the next field's bytes, a keccak256 word the 16 output
+            // bytes Th drops. No such value is masked on its way into a hash; instead each
+            // store is placed so that its low half never reaches a hash input:
+            //   ρ         stored at 0x48, once for both digest calls; each reads 0x08..0x57
+            //             and no hash ever reads 0x58..0x67
+            //   digests   D_0 and D_1 are full 32-byte words and never stored; section 1
+            //             extracts upstream's fields only (idx from D_0[16..20], the FORS
+            //             indices from D_0[0..16] and D_1[0..16]) and masks or shifts out
+            //             every other bit
+            //   sk_κ      stored at 0x28; the leaf hash reads 0x28..0x37
+            //   FORS and XMSS nodes, their siblings, and the WOTS leaf: L/R PLACEMENT
+            //   FORS tops the same placement into the packed top words at 0x88 + 32κ
+            //             (section 2); tree κ < 23's stray low half lands on tree κ+1's
+            //             top_0 slot, which tree κ+1 writes next, and tree 23's (bit 9 of
+            //             u_23 set) on 0x388..0x397
+            //   counter   calldatacopy'd to 0x388..0x38B after the FORS loop, over the start
+            //             of tree 23's stray low half; the ENC hash reads 0x68..0x38B, so
+            //             the rest of that half (0x38C..0x397) is never read
+            //   ENC hash  only its high 16 bytes (d) are read
+            //   σ_i and every chain-step output: a CHAIN hash reads 0x28..0x37 only; the
+            //             32-byte store of end_i at 0x88 + 16i puts its low half on
+            //             end_{i+1}'s slot, which the next (ascending) store overwrites, and
+            //             end_63's spills to 0x488..0x497, past the LEAF payload [0x88, 0x488).
+            //             The 64 ascending stores rewrite every byte of [0x88, 0x488), so
+            //             nothing of the ENC input (tops, counter, the stray half: all of
+            //             [0x88, 0x398)) survives into the LEAF payload
+            // N_MASK is applied once, to the XMSS root before the comparison with pkRoot.
+            // The unmasked low halves are nonzero (calldata, hash output), so breaking one of
+            // these invariants (a longer hash read, reordered stores) corrupts a hash input
+            // on every signature and fails the known-answer tests.
+            //
+            // L/R PLACEMENT. A Merkle pair `L ‖ R` is the 32 payload bytes 0x28..0x47. The
+            // current node, a 32-byte keccak word, is stored at p = 0x28 + 16·bit (the L
+            // slot when the side bit is 0, the R slot when it is 1), then the sibling's 16
+            // calldata bytes are calldatacopy'd into the other slot, xor(p, 0x10).
+            // calldatacopy writes exactly 16 bytes, so with the node written first its
+            // stray low half is harmless: it lands on the R slot, which the sibling then
+            // overwrites, or on 0x48..0x57, past the 0x40-byte hash input. This is
+            // Solady's MerkleProofLib swap (node at s, sibling at xor(s, 0x20)) adapted to
+            // 16-byte children: no mask, no swap arithmetic, no branch.
+            //
+            // SIDE TABLES. The slots of a whole climb are precomputed from its index (u_κ
+            // for a FORS tree, idx for the XMSS fold) into one word S: byte ℓ of S, counting
+            // from the low end, is 0x28 + 16·(bit ℓ of the index), so level ℓ's p is
+            // byte(31 - ℓ, S). A chunk of c ≤ 7 index bits is spread to one bit per byte by
+            // a multiply: chunk·Σ_{ℓ<c} 2^(7ℓ) puts bit ℓ at bit 7ℓ + ℓ = 8ℓ, and the c
+            // shifted copies (7 bits apart, at most 7 bits wide) never overlap, so the
+            // product has no carries; the mask Σ_{ℓ<c} 2^(8ℓ) keeps exactly those bits.
+            // Then shl(4, ·) | 0x2828…28 turns each byte into 0x28 or 0x38.
+            let N_MASK := 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000000000000000000000000000000
+
+            // ---------------------------------------------------------------
+            // Input checks (spec §12)
+            // ---------------------------------------------------------------
+
+            // PARAM IDENTITY: 5684 = 16 + k(1+a)·16 + 4 + v·16 + h·16
+            //                      = 16 + 24·11·16 + 4 + 64·16 + 26·16 (upstream SIG_SIZE).
+            if iszero(eq(sig.length, 5684)) {
+                mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
+                mstore(0x04, 0x20)
+                mstore(0x24, 18)
+                mstore(0x44, "Invalid sig length")
+                revert(0x00, 0x64)
+            }
+
+            // The key words are high-aligned: pkSeed = P ‖ 0^16, pkRoot = root ‖ 0^16.
+            // A nonzero low half would make pkRoot unreachable (the root is N_MASK'd)
+            // and would corrupt the address bytes of every prefix word built from
+            // pkSeed. Fail loudly instead of returning false forever.
+            if or(shl(128, pkSeed), shl(128, pkRoot)) {
+                mstore(0x00, 0x08c379a000000000000000000000000000000000000000000000000000000000)
+                mstore(0x04, 0x20)
+                mstore(0x24, 18)
+                mstore(0x44, "Invalid public key")
+                revert(0x00, 0x64)
+            }
+
+            let sigBase := sig.offset
+            // P at word bytes 8..23 (see HASH WINDOW): OR an address's low 8 bytes into
+            // the low 64 bits to get a prefix word.
+            let P := shr(64, pkSeed)
+            // The address's zero half, for both windows (see HASH WINDOW).
+            mstore(0x20, 0) // 0x20..0x3F; 0x28.. is payload, written before every read
+            mstore(0x80, 0) // 0x80..0x9F; 0x88.. is payload, written before every read
+
+            // ---------------------------------------------------------------
+            // 1. Message digest (upstream's two calls, spec §5 as amended) — 2 keccak
+            //    D_c = ThFull(P, address(MSG=12, step 0, hi=c, lo=0), m ‖ ρ), c = 0, 1,
+            //    32 + 32 + 16 = 80 input bytes each, untruncated (upstream digest_block).
+            //    word_{c,w} = u64 LE of D_c[8w : 8w+8].
+            //    The two inputs differ only in hi, whose byte 0 is at bits 24..31 of the
+            //    prefix word (see HASH WINDOW), so m ‖ ρ is stored once and only the prefix
+            //    word is rewritten. Both calls run before section 2, whose stores overwrite
+            //    m ‖ ρ (the leaf payload at 0x28, node words at 0x38 reaching 0x57).
+            // ---------------------------------------------------------------
+            mstore(0x00, or(P, 12))
+            mstore(0x28, message)
+            mstore(0x48, calldataload(sigBase)) // ρ = sig[0:16]; unmasked, see MASKING
+            let D0 := keccak256(0x08, 0x50)
+            mstore(0x00, or(P, or(12, shl(24, 1)))) // hi = 1
+            let D1 := keccak256(0x08, 0x50)
+            // Leaf index (upstream index_of_block): idx = word_{0,2} & (2^26 - 1), word_{0,2}
+            // = u64 LE of D_0[16:24], so idx = D_0[16] | D_0[17] << 8 | D_0[18] << 16 |
+            // (D_0[19] & 3) << 24. Every FORS, ENC, CHAIN and LEAF address has lo = idx: lo
+            // bytes 0..3 = D_0[16], D_0[17], D_0[18], D_0[19] & 3. In the raw hash word those
+            // bytes sit at bits 120..127, 112..119, 104..111 and 96..103; shifted down by 64
+            // they are at bits 56..63, 48..55, 40..47 and 32..39, exactly where the lo field
+            // goes (see HASH WINDOW), so the field is a mask of D_0 >> 64, with no byte
+            // swap. PARAM IDENTITY: the mask keeps h = 26 bits, 3 bytes + 2 bits (0x03 on
+            // D_0[19], bits 32..33).
+            let idxLo := and(shr(64, D0), 0xFFFFFF0300000000)
+            // The FORS indices are in words 0 and 1 of each call (section 2), i.e. bytes
+            // 0..15, the HIGH 128 bits of each raw hash word, so one word holds all of them:
+            // Y = D_0[0:16] ‖ D_1[0:16]. Byte-reversing Y (swap adjacent bytes, then 2-, 4-,
+            // 8- and 16-byte groups) turns it into the little-endian 256-bit number
+            // word_{0,0} + 2^64·word_{0,1} + 2^128·word_{1,0} + 2^192·word_{1,1}, so
+            // word_{c,w} = (yRev >> 64(2c + w)) mod 2^64.
+            let yRev := or(and(D0, N_MASK), shr(128, D1))
+            {
+                let m := 0x00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF
+                yRev := or(and(shr(8, yRev), m), shl(8, and(yRev, m)))
+                m := 0x0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF
+                yRev := or(and(shr(16, yRev), m), shl(16, and(yRev, m)))
+                m := 0x00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF00000000FFFFFFFF
+                yRev := or(and(shr(32, yRev), m), shl(32, and(yRev, m)))
+                m := 0x0000000000000000FFFFFFFFFFFFFFFF0000000000000000FFFFFFFFFFFFFFFF
+                yRev := or(and(shr(64, yRev), m), shl(64, and(yRev, m)))
+                yRev := or(shr(128, yRev), shl(128, yRev))
+            }
+            // The XMSS fold's SIDE TABLE (section 5), built here while D_0 is at hand:
+            // byte ℓ of SX (from the low end) is 0x28 + 16·(bit ℓ of idx), idx assembled
+            // from its four digest bytes (above; byte(k, D0) is D_0[k]) and spread in 7-bit
+            // chunks (bits 0..6, 7..13, 14..20, 21..25). The last chunk has 5 bits: its
+            // copies (7 apart, 5 wide) still never overlap, and table bytes 26, 27 get bits
+            // 5, 6 of the chunk, which are 0 (the 0x28 constant stops at byte 25, so those
+            // bytes stay 0x00 and are never read).
+            // PARAM IDENTITIES: 3 = the 2 bits of D_0[19] in 2^h - 1; 26 table bytes = h;
+            // 0x40810204081 = Σ_{ℓ<7} 2^(7ℓ), 0x1010101010101 = Σ_{ℓ<7} 2^(8ℓ).
+            let SX
+            {
+                let idx := or(
+                    or(byte(16, D0), shl(8, byte(17, D0))),
+                    or(shl(16, byte(18, D0)), shl(24, and(byte(19, D0), 3)))
+                )
+                SX := or(0x2828282828282828282828282828282828282828282828282828, shl(4, or(
+                    or(
+                        and(mul(and(idx, 0x7F), 0x40810204081), 0x1010101010101),
+                        shl(56, and(mul(and(shr(7, idx), 0x7F), 0x40810204081), 0x1010101010101))
+                    ),
+                    or(
+                        shl(112, and(mul(and(shr(14, idx), 0x7F), 0x40810204081), 0x1010101010101)),
+                        shl(168, and(mul(shr(21, idx), 0x40810204081), 0x1010101010101))
+                    )
+                )))
+            }
+
+            // ---------------------------------------------------------------
+            // 2. FORS recovery (spec §7) — 24 · (1 leaf + 9 nodes) = 240 keccak
+            //    Per tree κ: opened leaf u_κ, secret sk_κ, path p_κ[0..9]
+            //    (upstream fors_recover).
+            //      node = Th(P, FTS_LEAF(pos(κ,0,u), idx), sk)
+            //      ℓ = 0..8: node = Th(P, FTS_NODE(pos(κ,ℓ+1,u>>(ℓ+1)), idx), L ‖ R),
+            //                (L, R) = bit ℓ of u ? (p[ℓ], node) : (node, p[ℓ])
+            //      tops (top_{κ,0}, top_{κ,1}) ordered by bit 9 of u with p[9].
+            //    A FORS tree has no root hash, and there is no FORS key hash: the two
+            //    level-9 nodes of each tree go straight into the WOTS+C encoding (section 3).
+            //
+            //    FORS HI FIELD. hi = pos(κ,ℓ,j) = κ | ℓ<<5 | j<<9 (disjoint bit fields,
+            //    j < 2^10), so its 3 little-endian bytes are byte 0 = κ | (ℓ&7)<<5, byte 1 =
+            //    ℓ>>3 | (j&0x7F)<<1, byte 2 = j>>7. In the prefix word: κ at bits 24..28,
+            //    the level at bits 29..31 and 16, j&0x7F at bits 17..23, j>>7 at bits 8..10.
+            //    κ is a per-tree value and the level a literal in each unrolled level. For
+            //    j = u>>up, W = u·(2^17 + 2^1) holds two disjoint copies of u (bits 17..26
+            //    and 1..10): after shr(up, W) the first copy has j at bit 17 and the
+            //    second has j>>7 at bit 8, so and(shr(up, W), J_LO) is the j part: for
+            //    up ≤ 4 the second copy ends at bit 10 - up and the first copy's low bits of
+            //    u (the ones j drops) start at bit 17 - up ≥ 13, so bits 11, 12 are zero, and
+            //    j's bits above 6 in the first copy (bits 24..26 - up) are above the mask.
+            //    For up ≥ 5, j < 2^(10-up) ≤ 32, so j>>7 = 0, while the first copy's dropped
+            //    low bits reach down to bit 17 - up ≤ 12, so the mask keeps bits 17..23 only
+            //    (J_HI).
+            // ---------------------------------------------------------------
+            let J_LO := 0xFE1F00 // bits 17..23 and 8..12 (up ≤ 4)
+            let J_HI := 0xFE0000 // bits 17..23           (up ≥ 5)
+            // P and lo = idx are shared by every FORS address; the type (t = 9 FTS_LEAF,
+            // t = 10 FTS_NODE) goes into each hash's literal part.
+            let forsAdrs := or(P, idxLo)
+            // κ = 12c + r (c = 0, 1; r < 12): u_κ = (word_{c,⌊r/6⌋} >> 10·(r mod 6)) & 0x3FF
+            // (upstream message_digest), six 10-bit indices per 64-bit word (bits 0..59). So
+            // κ = 6q + t with q = 2c + ⌊r/6⌋, the index of the word in yRev (section 1), and
+            // t = r mod 6. Dropping each of the four words' 4 unused top bits packs the 24
+            // indices back to back, U = Σ u_κ·2^(10κ) (240 bits), so tree κ takes the low
+            // 10 bits and shifts U down. PARAM IDENTITIES: 0xFFFFFFFFFFFFFFF = 2^60 - 1 = six
+            // a-bit indices; 4 words · 6 = 24 = k; 0x3FF = 2^a - 1.
+            let U := or(
+                or(and(yRev, 0xFFFFFFFFFFFFFFF), shl(60, and(shr(64, yRev), 0xFFFFFFFFFFFFFFF))),
+                or(
+                    shl(120, and(shr(128, yRev), 0xFFFFFFFFFFFFFFF)),
+                    shl(180, and(shr(192, yRev), 0xFFFFFFFFFFFFFFF))
+                )
+            )
+            for { let kappa := 0 } lt(kappa, 24) { kappa := add(kappa, 1) } {
+                let u := and(U, 0x3FF)
+                U := shr(10, U)
+                // treePtr = sig + 176κ, so sk_κ is at treePtr + 16 (sig offset 16 + 176κ)
+                // and p_κ[ℓ] at treePtr + 32 + 16ℓ (sig offset 32 + 176κ + 16ℓ).
+                // PARAM IDENTITY: 176 = (1 + a)·n = 11·16, one tree's opening.
+                let treePtr := add(sigBase, mul(176, kappa))
+                // κ (< 32, byte 0 of hi) at bits 24..28.
+                let treeAdrs := or(forsAdrs, shl(24, kappa))
+                let W := mul(u, 0x20002) // 2^17 + 2^1, see FORS HI FIELD
+                // SIDE TABLE: byte ℓ of S (from the low end) is 0x28 + 16·(bit ℓ of u),
+                // spread in a 6-bit chunk and a 4-bit one. The second, shr(6, u) < 2^4, goes
+                // through the same 6-copy multiply: its copies (7 apart, 4 wide) still never
+                // overlap, and table bytes 10, 11 get bits 4, 5 of the chunk, which are 0 (the
+                // 0x28 constant stops at byte 9, so those bytes stay 0x00 and are never read).
+                // PARAM IDENTITIES: 10 table bytes = a; 0x810204081 = Σ_{ℓ<6} 2^(7ℓ),
+                // 0x10101010101 = Σ_{ℓ<6} 2^(8ℓ).
+                let S := or(0x28282828282828282828, shl(4, or(
+                    and(mul(and(u, 0x3F), 0x810204081), 0x10101010101),
+                    shl(48, and(mul(shr(6, u), 0x810204081), 0x10101010101))
+                )))
+
+                // Leaf: hi = pos(κ, 0, u) = κ + 512u.
+                mstore(0x00, or(treeAdrs, or(9, and(W, J_LO))))
+                mstore(0x28, calldataload(add(treePtr, 16))) // sk_κ; unmasked, see MASKING
+                let node := keccak256(0x08, 0x30) // unmasked, see L/R PLACEMENT
+
+                // Levels 1..9 (a - 1 = 9 node hashes), unrolled: L/R PLACEMENT with p
+                // from S, p_κ[ℓ] at treePtr + 32 + 16ℓ; t = 10 and the level in the literal.
+                let p
+                // ℓ = 0: side = bit 0 of u, hi = pos(κ, 1, u >> 1), sibling p_κ[0]
+                p := byte(31, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 1)), and(shr(1, W), J_LO))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 32), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 1: side = bit 1 of u, hi = pos(κ, 2, u >> 2), sibling p_κ[1]
+                p := byte(30, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 2)), and(shr(2, W), J_LO))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 48), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 2: side = bit 2 of u, hi = pos(κ, 3, u >> 3), sibling p_κ[2]
+                p := byte(29, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 3)), and(shr(3, W), J_LO))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 64), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 3: side = bit 3 of u, hi = pos(κ, 4, u >> 4), sibling p_κ[3]
+                p := byte(28, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 4)), and(shr(4, W), J_LO))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 80), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 4: side = bit 4 of u, hi = pos(κ, 5, u >> 5), sibling p_κ[4]
+                p := byte(27, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 5)), and(shr(5, W), J_HI))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 96), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 5: side = bit 5 of u, hi = pos(κ, 6, u >> 6), sibling p_κ[5]
+                p := byte(26, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 6)), and(shr(6, W), J_HI))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 112), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 6: side = bit 6 of u, hi = pos(κ, 7, u >> 7), sibling p_κ[6]
+                p := byte(25, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(29, 7)), and(shr(7, W), J_HI))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 128), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 7: side = bit 7 of u, hi = pos(κ, 8, u >> 8), sibling p_κ[7]
+                p := byte(24, S)
+                mstore(0x00, or(treeAdrs, or(or(10, shl(16, 1)), and(shr(8, W), J_HI))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 144), 0x10)
+                node := keccak256(0x08, 0x40)
+                // ℓ = 8: side = bit 8 of u, hi = pos(κ, 9, u >> 9), sibling p_κ[8]
+                p := byte(23, S)
+                mstore(0x00, or(treeAdrs, or(or(10, or(shl(29, 1), shl(16, 1))), and(shr(9, W), J_HI))))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 160), 0x10)
+                node := keccak256(0x08, 0x40)
+
+                // Tops: the level-9 node and its sibling p_κ[9] (sig offset
+                // 32 + 176κ + 16·9 = 176 + 176κ), ordered by bit 9 of u, form the packed
+                // word top_{κ,0} ‖ top_{κ,1} at 0x88 + 32κ, by the same placement: p =
+                // 0x88 + 32κ + 16·bit = 0x60 + 32κ + byte 9 of S, and 0x88 + 32κ has bit 4
+                // clear, so xor(p, 0x10) is the other half of that word. A stray node low
+                // half lands on tree κ+1's top_0 slot, which that tree writes next, or for
+                // κ = 23 on 0x388..0x397, which the counter (section 3) partly overwrites
+                // and the ENC hash reads no further than 0x38B (see MASKING).
+                p := add(add(0x60, shl(5, kappa)), byte(22, S))
+                mstore(p, node)
+                calldatacopy(xor(p, 0x10), add(treePtr, 176), 0x10)
+            }
+
+            // ---------------------------------------------------------------
+            // 3. WOTS+C encoding (spec §6) — 1 keccak, 6 permutations
+            //    d = Th(P, ENC(hi=0, lo=e=idx), tops ‖ LE32(c)) (upstream encode),
+            //    tops = top_{0,0} ‖ top_{0,1} ‖ … ‖ top_{23,1} (768 B, spec §7), so the
+            //    input is 32 + 768 + 4 = 804 = 0x324 bytes. There is no FORS key hash:
+            //    the encoding absorbs the 24 packed top words, already in place at
+            //    0x88..0x387, in the wide window (prefix word at 0x60, read from 0x68).
+            //    The counter's 4 signature bytes are LE32(c) already and go back into the
+            //    payload in the same order, so c is never decoded: calldatacopy moves the
+            //    4 bytes at sig offset 4240 to payload bytes 768..771 (0x388..0x38B), right
+            //    after the tops and over the start of tree 23's stray low half. It must
+            //    follow the FORS loop (tree 23's top store can write 0x388..0x397).
+            //    0x68 + 0x324 = 0x38C: the read stops exactly at the counter's last byte.
+            // ---------------------------------------------------------------
+            calldatacopy(0x388, add(sigBase, 4240), 4)
+            mstore(0x60, or(P, or(idxLo, 4)))
+            // X = d as u128 little endian, x_i = (X >> 2i) & 3, i = 0..63: for i = 4k + r,
+            // bits 2r..2r+1 of byte k of d. d is the high 16 bytes of the raw hash word h,
+            // so byte k of d is byte(k, h) and X is never formed; the low 16 bytes of h
+            // (the dropped half of the hash) are never read: unmasked, see MASKING.
+            let h := keccak256(0x68, 0x324)
+
+            // Admissible iff Σ x_i = T. A well-formed signature that fails is rejected by
+            // returning `false` (the bool contract), not by reverting — uniform with the
+            // root mismatch below.
+            // The sum is a SWAR reduction over the 64 two-bit fields of d = h >> 128 (byte
+            // order does not change which 2-bit fields there are, so d is not byte-reversed):
+            //   pairs of x_i into 32 nibbles, each ≤ 6;
+            //   pairs of nibbles into 16 bytes, each ≤ 12;
+            //   multiplying by 0x0101…01 (16 ones) puts the sum of all 16 bytes in byte 15
+            //   (bits 120..127). Every partial byte sum is ≤ 16·12 = 192 < 256, so no byte
+            //   carries into the next and byte 15 is exact.
+            // PARAM IDENTITIES: 128-bit masks = v·w = 64·2 bits of d; 3 = 2^w - 1; the
+            // compared 120 is T (upstream TARGET_SUM).
+            {
+                let d := shr(128, h)
+                let t := add(
+                    and(d, 0x33333333333333333333333333333333),
+                    and(shr(2, d), 0x33333333333333333333333333333333)
+                )
+                t := and(add(t, shr(4, t)), 0x0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F0F)
+                let sum := and(shr(120, mul(t, 0x01010101010101010101010101010101)), 0xFF)
+                if iszero(eq(sum, 120)) {
+                    mstore(0x00, 0)
+                    return(0x00, 0x20)
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // 4. WOTS chains (spec §6) — Σ (3 - x_i) = 192 - T = 72 keccak
+            //    end_i = chain σ_i from position x_i to 3; the step onto position `to`
+            //    is Th(P, CHAIN(step = to-1, hi = i, lo = e), x).
+            //    Chain i still needs n_i = 3 - x_i steps. n_i is the 2-bit complement of
+            //    x_i, so the n of chains 4k..4k+3 are the 2-bit fields of
+            //    nb = byte(k, h) xor 0xFF (bits 2r..2r+1 for chain 4k + r; nb is one byte,
+            //    so shr(6, nb) needs no mask). Each chain switches on n into straight-line
+            //    code, cases in falling frequency: under Σ x_i = T the x_i lean high
+            //    (P[x = 3, 2, 1, 0] ≈ 0.37, 0.28, 0.20, 0.15). Within a chain only address
+            //    byte 7 (t | step << 5, memory 0x1F) changes from step to step, so the
+            //    later steps rewrite that byte with mstore8.
+            //    Unrolled by 4: one codeword byte per iteration, chains in ascending
+            //    order. end_i goes to 0x88 + 16i; each 32-byte store's low half (the rest
+            //    of the hash word, or σ_{i+1} when x_i = 3) lands on end_{i+1}'s slot,
+            //    which the next store overwrites; the last one spills 16 bytes to
+            //    0x488..0x497, past the LEAF payload.
+            // ---------------------------------------------------------------
+            let chainAdrs := or(P, or(idxLo, 1)) // t = CHAIN, step field 0
+            let wots := add(sigBase, 4244) // σ_i at sig offset 4244 + 16i
+            for { let off := 0 } lt(off, 1024) { off := add(off, 64) } { // off = 64k = 16·4k
+                let nb := xor(byte(shr(6, off), h), 0xFF)
+                let ptr := add(wots, off) // σ_{4k}
+                let slot := add(0x88, off) // end_{4k}
+                // hi = i = 4k + r < 64 is one byte, at bits 24..31: shl(24, 4k) = shl(20, off).
+                let a := or(chainAdrs, shl(20, off))
+                { // chain 4k + 0
+                    let val := calldataload(ptr) // σ_i; unmasked, see MASKING
+                    switch and(nb, 3)
+                    case 0 {} // x = 3: end = σ
+                    case 1 {
+                        mstore(0x00, or(a, 0x40)) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    case 2 {
+                        mstore(0x00, or(a, 0x20)) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    default {
+                        mstore(0x00, a) // onto 1
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x21) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    mstore(slot, val)
+                }
+                { // chain 4k + 1
+                    let val := calldataload(add(ptr, 16)) // σ_i; unmasked, see MASKING
+                    switch and(shr(2, nb), 3)
+                    case 0 {} // x = 3: end = σ
+                    case 1 {
+                        mstore(0x00, or(or(a, shl(24, 1)), 0x40)) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    case 2 {
+                        mstore(0x00, or(or(a, shl(24, 1)), 0x20)) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    default {
+                        mstore(0x00, or(a, shl(24, 1))) // onto 1
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x21) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    mstore(add(slot, 16), val)
+                }
+                { // chain 4k + 2
+                    let val := calldataload(add(ptr, 32)) // σ_i; unmasked, see MASKING
+                    switch and(shr(4, nb), 3)
+                    case 0 {} // x = 3: end = σ
+                    case 1 {
+                        mstore(0x00, or(or(a, shl(24, 2)), 0x40)) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    case 2 {
+                        mstore(0x00, or(or(a, shl(24, 2)), 0x20)) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    default {
+                        mstore(0x00, or(a, shl(24, 2))) // onto 1
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x21) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    mstore(add(slot, 32), val)
+                }
+                { // chain 4k + 3
+                    let val := calldataload(add(ptr, 48)) // σ_i; unmasked, see MASKING
+                    switch shr(6, nb)
+                    case 0 {} // x = 3: end = σ
+                    case 1 {
+                        mstore(0x00, or(or(a, shl(24, 3)), 0x40)) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    case 2 {
+                        mstore(0x00, or(or(a, shl(24, 3)), 0x20)) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    default {
+                        mstore(0x00, or(a, shl(24, 3))) // onto 1
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x21) // onto 2
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                        mstore8(0x1F, 0x41) // onto 3
+                        mstore(0x28, val)
+                        val := keccak256(0x08, 0x30)
+                    }
+                    mstore(add(slot, 48), val)
+                }
+            }
+
+            // WOTS leaf = Th(P, LEAF(hi=0, lo=e), end_0 ‖ … ‖ end_63) — 1 keccak.
+            // Prefix word at 0x60, 1024-byte payload at 0x88: 32 + 1024 = 0x420 bytes
+            // from 0x68.
+            mstore(0x60, or(P, or(idxLo, 2)))
+            let cur := keccak256(0x68, 0x420) // unmasked, see L/R PLACEMENT
+
+            // ---------------------------------------------------------------
+            // 5. XMSS fold (spec §8) — 26 keccak
+            //    ℓ = 0..25: cur = Th(P, NODE(hi = ℓ+1, lo = idx >> (ℓ+1)), L ‖ R),
+            //               (L, R) = bit ℓ of idx ? (path[ℓ], cur) : (cur, path[ℓ]).
+            //    Unrolled, with L/R PLACEMENT and path[ℓ] at sig offset 5268 + 16ℓ (the
+            //    last one, 5668..5683, ends exactly at the end of the signature).
+            //    side   p = byte(31 - ℓ, SX), the SIDE TABLE built in section 1
+            //    lo     LE32(idx >> up), up = ℓ+1, from idxLo = LE32(idx) in the lo field
+            //           (bits 32..63, byte k at bits 56-8k..63-8k) with literal shifts and
+            //           masks. For up = 8q + r: dropping q whole bytes is a left shift by
+            //           8q (byte k+q moves up to byte k), and shifting by the remaining r
+            //           bits gives byte k = (b_k >> r) | (b_{k+1} << 8-r):
+            //             and(idxLo << (8q - r), (0xFF >> r) in every byte)
+            //           | and(idxLo << (8q + 16 - r), (0xFF << 8-r) in every byte)
+            //           (a negative shift is a right shift). The 8-byte repeating masks
+            //           also clear everything outside bits 32..63: no shifted copy has a
+            //           bit below 32 that the mask keeps. r = 0 needs one term. For q = 3
+            //           (up = 25) the second term is zero (lo has no byte 4: the shift by
+            //           8·3 + 16 - 1 = 39 moves every idxLo bit, all ≥ 32, past bit 63), so
+            //           up = 25 needs one term too; up = 26 has lo = 0.
+            //    t = NODE (3) and hi = ℓ+1 (one byte, at bits 24..31) are in the literal.
+            //    Here the pair goes in before the prefix word, in the FORS levels after it:
+            //    the two touch disjoint bytes (0x28..0x57 and 0x00..0x1F), so the order
+            //    only changes the via-IR stack schedule, and each section keeps its cheaper
+            //    one (measured: the other order costs +3 gas here and +320 in FORS).
+            // ---------------------------------------------------------------
+            let p
+            let lo
+            // ℓ = 0: hi = 1, lo = LE32(idx >> 1), side = bit 0 of idx, sibling path[0]
+            p := byte(31, SX)
+            lo := or(and(shr(1, idxLo), 0x7F7F7F7F7F7F7F7F), and(shl(15, idxLo), 0x8080808080808080))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5268), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 1)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 1: hi = 2, lo = LE32(idx >> 2), side = bit 1 of idx, sibling path[1]
+            p := byte(30, SX)
+            lo := or(and(shr(2, idxLo), 0x3F3F3F3F3F3F3F3F), and(shl(14, idxLo), 0xC0C0C0C0C0C0C0C0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5284), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 2)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 2: hi = 3, lo = LE32(idx >> 3), side = bit 2 of idx, sibling path[2]
+            p := byte(29, SX)
+            lo := or(and(shr(3, idxLo), 0x1F1F1F1F1F1F1F1F), and(shl(13, idxLo), 0xE0E0E0E0E0E0E0E0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5300), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 3)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 3: hi = 4, lo = LE32(idx >> 4), side = bit 3 of idx, sibling path[3]
+            p := byte(28, SX)
+            lo := or(and(shr(4, idxLo), 0x0F0F0F0F0F0F0F0F), and(shl(12, idxLo), 0xF0F0F0F0F0F0F0F0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5316), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 4)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 4: hi = 5, lo = LE32(idx >> 5), side = bit 4 of idx, sibling path[4]
+            p := byte(27, SX)
+            lo := or(and(shr(5, idxLo), 0x0707070707070707), and(shl(11, idxLo), 0xF8F8F8F8F8F8F8F8))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5332), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 5)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 5: hi = 6, lo = LE32(idx >> 6), side = bit 5 of idx, sibling path[5]
+            p := byte(26, SX)
+            lo := or(and(shr(6, idxLo), 0x0303030303030303), and(shl(10, idxLo), 0xFCFCFCFCFCFCFCFC))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5348), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 6)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 6: hi = 7, lo = LE32(idx >> 7), side = bit 6 of idx, sibling path[6]
+            p := byte(25, SX)
+            lo := or(and(shr(7, idxLo), 0x0101010101010101), and(shl(9, idxLo), 0xFEFEFEFEFEFEFEFE))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5364), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 7)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 7: hi = 8, lo = LE32(idx >> 8), side = bit 7 of idx, sibling path[7]
+            p := byte(24, SX)
+            lo := and(shl(8, idxLo), 0xFFFFFFFFFFFFFFFF)
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5380), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 8)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 8: hi = 9, lo = LE32(idx >> 9), side = bit 8 of idx, sibling path[8]
+            p := byte(23, SX)
+            lo := or(and(shl(7, idxLo), 0x7F7F7F7F7F7F7F7F), and(shl(23, idxLo), 0x8080808080808080))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5396), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 9)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 9: hi = 10, lo = LE32(idx >> 10), side = bit 9 of idx, sibling path[9]
+            p := byte(22, SX)
+            lo := or(and(shl(6, idxLo), 0x3F3F3F3F3F3F3F3F), and(shl(22, idxLo), 0xC0C0C0C0C0C0C0C0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5412), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 10)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 10: hi = 11, lo = LE32(idx >> 11), side = bit 10 of idx, sibling path[10]
+            p := byte(21, SX)
+            lo := or(and(shl(5, idxLo), 0x1F1F1F1F1F1F1F1F), and(shl(21, idxLo), 0xE0E0E0E0E0E0E0E0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5428), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 11)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 11: hi = 12, lo = LE32(idx >> 12), side = bit 11 of idx, sibling path[11]
+            p := byte(20, SX)
+            lo := or(and(shl(4, idxLo), 0x0F0F0F0F0F0F0F0F), and(shl(20, idxLo), 0xF0F0F0F0F0F0F0F0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5444), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 12)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 12: hi = 13, lo = LE32(idx >> 13), side = bit 12 of idx, sibling path[12]
+            p := byte(19, SX)
+            lo := or(and(shl(3, idxLo), 0x0707070707070707), and(shl(19, idxLo), 0xF8F8F8F8F8F8F8F8))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5460), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 13)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 13: hi = 14, lo = LE32(idx >> 14), side = bit 13 of idx, sibling path[13]
+            p := byte(18, SX)
+            lo := or(and(shl(2, idxLo), 0x0303030303030303), and(shl(18, idxLo), 0xFCFCFCFCFCFCFCFC))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5476), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 14)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 14: hi = 15, lo = LE32(idx >> 15), side = bit 14 of idx, sibling path[14]
+            p := byte(17, SX)
+            lo := or(and(shl(1, idxLo), 0x0101010101010101), and(shl(17, idxLo), 0xFEFEFEFEFEFEFEFE))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5492), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 15)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 15: hi = 16, lo = LE32(idx >> 16), side = bit 15 of idx, sibling path[15]
+            p := byte(16, SX)
+            lo := and(shl(16, idxLo), 0xFFFFFFFFFFFFFFFF)
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5508), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 16)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 16: hi = 17, lo = LE32(idx >> 17), side = bit 16 of idx, sibling path[16]
+            p := byte(15, SX)
+            lo := or(and(shl(15, idxLo), 0x7F7F7F7F7F7F7F7F), and(shl(31, idxLo), 0x8080808080808080))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5524), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 17)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 17: hi = 18, lo = LE32(idx >> 18), side = bit 17 of idx, sibling path[17]
+            p := byte(14, SX)
+            lo := or(and(shl(14, idxLo), 0x3F3F3F3F3F3F3F3F), and(shl(30, idxLo), 0xC0C0C0C0C0C0C0C0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5540), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 18)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 18: hi = 19, lo = LE32(idx >> 19), side = bit 18 of idx, sibling path[18]
+            p := byte(13, SX)
+            lo := or(and(shl(13, idxLo), 0x1F1F1F1F1F1F1F1F), and(shl(29, idxLo), 0xE0E0E0E0E0E0E0E0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5556), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 19)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 19: hi = 20, lo = LE32(idx >> 20), side = bit 19 of idx, sibling path[19]
+            p := byte(12, SX)
+            lo := or(and(shl(12, idxLo), 0x0F0F0F0F0F0F0F0F), and(shl(28, idxLo), 0xF0F0F0F0F0F0F0F0))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5572), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 20)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 20: hi = 21, lo = LE32(idx >> 21), side = bit 20 of idx, sibling path[20]
+            p := byte(11, SX)
+            lo := or(and(shl(11, idxLo), 0x0707070707070707), and(shl(27, idxLo), 0xF8F8F8F8F8F8F8F8))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5588), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 21)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 21: hi = 22, lo = LE32(idx >> 22), side = bit 21 of idx, sibling path[21]
+            p := byte(10, SX)
+            lo := or(and(shl(10, idxLo), 0x0303030303030303), and(shl(26, idxLo), 0xFCFCFCFCFCFCFCFC))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5604), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 22)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 22: hi = 23, lo = LE32(idx >> 23), side = bit 22 of idx, sibling path[22]
+            p := byte(9, SX)
+            lo := or(and(shl(9, idxLo), 0x0101010101010101), and(shl(25, idxLo), 0xFEFEFEFEFEFEFEFE))
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5620), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 23)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 23: hi = 24, lo = LE32(idx >> 24), side = bit 23 of idx, sibling path[23]
+            p := byte(8, SX)
+            lo := and(shl(24, idxLo), 0xFFFFFFFFFFFFFFFF)
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5636), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 24)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 24: hi = 25, lo = LE32(idx >> 25), side = bit 24 of idx, sibling path[24]
+            p := byte(7, SX)
+            lo := and(shl(23, idxLo), 0x7F7F7F7F7F7F7F7F) // the second term is zero, see lo
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5652), 0x10)
+            mstore(0x00, or(P, or(lo, or(3, shl(24, 25)))))
+            cur := keccak256(0x08, 0x40)
+            // ℓ = 25: hi = 26, lo = LE32(idx >> 26), side = bit 25 of idx, sibling path[25]
+            p := byte(6, SX)
+            mstore(p, cur)
+            calldatacopy(xor(p, 0x10), add(sigBase, 5668), 0x10)
+            mstore(0x00, or(P, or(3, shl(24, 26)))) // lo = idx >> 26 = 0
+            cur := keccak256(0x08, 0x40)
+
+            valid := eq(and(cur, N_MASK), pkRoot)
+            mstore(0x00, valid)
+            return(0x00, 0x20)
+        }
+    }
+}

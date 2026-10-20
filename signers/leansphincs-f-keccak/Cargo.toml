@@ -1,0 +1,31 @@
+[package]
+name = "leansphincs-f-keccak"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "leanSphincs-f over keccak256: h=26, a=9, k=20, WOTS+C (w=4, T=122), merged encoding; port of the upstream leanSphincs crate's keccak branch"
+
+# A standalone crate: never part of another workspace.
+[workspace]
+
+[lints.clippy]
+needless_range_loop = "allow"
+too_many_arguments = "allow"
+
+[dependencies]
+# Ethereum Keccak-256 (0x01 padding), the EVM's KECCAK256; not FIPS 202 SHA3-256.
+tiny-keccak = { version = "=2.0.2", features = ["keccak"] }
+
+[[bin]]
+name = "lsfk"
+path = "src/bin/lsfk.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = 1
+
+[profile.test]
+opt-level = 3

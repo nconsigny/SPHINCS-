@@ -23,16 +23,20 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
 | **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 46 | - | 6,592 B | ~37.3 K | ~204 K | - | - | 128 | 127.8 | 109.1 | 95.4 |
 | **C13** | WOTS+C / FORS+C | 22 | 2 | 19 | 7 | 8 | 43 | 208 | 3,688 B | ~10 M | 105 K ♦ | 188 K | 293 K | 128 | 128 | 128 | 128 |
 | **SLH-DSA-Keccak-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~94 K | - | - | 128 | 128 | 128 | 128 |
+| **leanSphincs** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 10 | 24 | 4 | 64 | 120 | 5,684 B | see below | ~53 K | - | - | 128 | 128 | 128 | 128 |
 | **leanSphincs-S** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 12 | 13 | 4 | 64 | 128 | 4,164 B | see below | ~39 K | - | - | 128 | 128 | 128 | 128 |
+| **leanSphincs-f** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 9 | 20 | 4 | 64 | 122 | 4,660 B | see below | ~44 K | - | - | 128 | 128 | 128 | 128 |
 
 - **Family**: the construction style. WOTS+C / FORS+C is the C-series compact construction with counter grinding
   (ePrint 2025/2203). Vanilla SPHINCs+ is the standard FIPS 205 construction with no counter grinding: C12 and
-  SLH-DSA-128-24 are the same algorithm at different parameter sets. leanSphincs is Tom Wambsgans'
+  SLH-DSA-128-24 are the same algorithm at different parameter sets. The leanSphincs family is Tom Wambsgans'
   [proposal](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates): one XMSS layer, WOTS+C, and FORS
-  without tree roots; leanSphincs-S is the [sphincs-art](https://nconsigny.github.io/sphincs-art/) parameter set.
+  without tree roots. leanSphincs is the proposal at its own parameters (the upstream crate's `keccak` branch),
+  leanSphincs-S the [sphincs-art](https://nconsigny.github.io/sphincs-art/) parameter set, and leanSphincs-f a
+  retuning of -S for faster signing (smaller FORS trees, a larger signature).
 - **sign_h**: hash calls for keygen plus one signature on a zero-memory signer (no caching between signatures, the
-  relevant case for a hardware wallet). A high number means a lot of work for the hardware. leanSphincs-S keeps a
-  generated key with a small node cache instead; see [Signing](#signing).
+  relevant case for a hardware wallet). A high number means a lot of work for the hardware. The leanSphincs variants
+  keep a generated key with a small node cache instead; see [Signing](#signing).
 - **swn**: the WOTS+C target sum, i.e. the digit sum the signer grinds its counter for. Vanilla SPHINCs+ uses the
   standard Winternitz checksum and doesn't grind.
 - **sec_N**: security bits at 2^N signatures per key. SLH-DSA-128-24 (h=22, d=1) is a **single XMSS tree of
@@ -40,14 +44,16 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
   therefore start around 2¹¹ signatures, well before the named 2²⁴ usage cap. This is expected and **absorbed by
   the FORS few-time layer** (it is not a WOTS forgery): the 128 bits come from the FORS margin, *not* from one-time
   WOTS use, so 2²⁴ is a recommended per-key **usage cap**, not a flat one-time guarantee. See
-  [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md). (review SLH-X-f2cap) leanSphincs-S's figures are for a
-  full 2²⁶ key, rated for 2²⁶ signatures (sphincs-art estimate, not proved); a pruned key's rating is lower (below).
+  [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md). (review SLH-X-f2cap) The leanSphincs figures are for a
+  full 2²⁶ key: leanSphincs's 2³⁰-signature lifetime is proved in Lean by the proposal; -S and -f are rated for 2²⁶
+  signatures (sphincs-art estimates of 103 M and 119 M, not proved). A pruned key's lifetime is lower (below).
 - **Verify (pure)**: Foundry gas of the verifier call alone (`gasleft()` around the call, or the call frame via
-  `vm.lastCallGas` for leanSphincs-S). C12's Forge e2e test prints ~665 K because it also copies the cached
-  6,592-B signature out of storage; ~204 K is the verifier itself.
+  `vm.lastCallGas` for leanSphincs). C12's Forge e2e test prints ~665 K because it also copies the cached 6,592-B
+  signature out of storage; ~204 K is the verifier itself.
 - **Frame**: total EIP-8141 frame-tx gas (ethrex). **4337**: total ERC-4337 `handleOps` tx gas (Sepolia), through
-  `SphincsAccount` + `SphincsAccountFactory`. `-` means no account has been deployed for that scheme yet
-  (leanSphincs-S plugs into `SphincsAccount` unchanged: `validateUserOp` is ~46.5 K in Forge).
+  `SphincsAccount` + `SphincsAccountFactory`. `-` means no account has been deployed for that scheme yet (the
+  leanSphincs verifiers plug into `SphincsAccount` unchanged: `validateUserOp` is ~60.8 K, ~46.5 K and ~51.6 K in
+  Forge for leanSphincs, -S and -f).
 - Frame and 4337 were measured against the deployed verifiers, which predate the October 2026 loop optimisations
   (C7's Verify column); a redeploy should lower each total by roughly the drop in the Verify column.
 - **♦** C13's verifier is pinned by the Lean model in `verity/`, so it does not have the loop optimisations that
@@ -76,13 +82,17 @@ SLH-DSA count one permutation per hash call (multi-block calls add about 1%).
 | C12 | 37.3 K (zero-memory) | 6.4 s | 0.29 ms | 73 µs |
 | C13 | ~10 M (zero-memory) | 29 min | 78 ms | 20 ms |
 | SLH-DSA-Keccak-128-24 | ~1.07 B (zero-memory) | 51 h | 8.4 s | 2.1 s |
+| leanSphincs | 73.5 K / 69.9 K / 92.2 K permutations | **13 s** (Light) | **0.55 ms** (Standard) | **0.18 ms** (Full) |
 | leanSphincs-S | 159 K / 155 K / 178 K permutations | **27 s** (Light) | **1.2 ms** (Standard) | **0.35 ms** (Full) |
+| leanSphincs-f | 38.4 K / 34.8 K / 57.1 K permutations | **6.6 s** (Light) | **0.27 ms** (Standard) | **0.11 ms** (Full) |
 
-- **leanSphincs-S** follows the page's one-signer tiers: the key is generated once and kept with a node cache.
-  Light keeps a 2¹³ subtree in 16 KiB (keygen 1.91 M permutations, 5.5 min on the Ledger; rated 20 K signatures);
-  Standard a 2²⁰ subtree in 1 MiB (244 M, 1.9 s; rated 2²¹); Full the whole 2²⁶ tree in 16 MiB (15.6 B, 31 s;
-  rated 2²⁶). The signatures are the same in every tier. Our Rust signer (`lssk`) measures 13–32 ms (Light) and
-  20–32 ms (Standard) per signature on 8 cores, key loading and a self-check included.
+- **leanSphincs, -S and -f** follow the page's one-signer tiers: the key is generated once and kept with a node
+  cache. Light keeps a 2¹³ subtree in 16 KiB (keygen 1.91 M permutations, 5.5 min on the Ledger), Standard a 2²⁰
+  subtree in 1 MiB (244 M, 1.9 s), Full the whole 2²⁶ tree in 16 MiB (15.6 B, 31 s), in every variant. Lifetimes:
+  leanSphincs 210 K / 22 M / 1.15 B (proved), -S and -f rated 20 K / 2²¹ / 2²⁶ (estimates). The signatures are the
+  same in every tier. **One seed = one key of one variant**: never reuse a seed across variants or tiers. Our Rust
+  signers `lsk` / `lssk` / `lsfk` take 4–9 / 7–29 / 3–12 ms per signature (Light) and 14–15 / 17–24 / 13–15 ms
+  (Standard) on 8 cores, key loading and a self-check included; keygen takes 0.06 s (Light) and 8 s (Standard).
 - **SLH-DSA-128-24** on a CPU that keeps its 2²² XMSS tree in RAM (128 MB) needs ~201 M hashes: 1.6 s / 0.39 s.
   FORS (6 trees of 2²⁴ leaves) has to be rebuilt for every signature, so it stays the slowest signer here.
 - **Measured on a Ledger Nano S+ today:** our C11 and C12 signers take 390 s and 47.5 s, about 750 Keccak calls per
@@ -105,9 +115,10 @@ Hash inputs and address layouts:
   truncated to 16 bytes.
 - **SLH-DSA-SHA2-128-24 and the SHA-256 twins** (`src/sha/`): FIPS 205 §11.2 ADRSc (22 bytes) over the SHA-256
   precompile; the NIST verifier is FIPS 205 external SLH-DSA.Verify with an empty context.
-- **leanSphincs-S** (`src/keccak/LeanSphincs-SAsm.sol`): leanSphincs's own 16-byte tweak,
-  `keccak256(P ‖ tweak ‖ payload)` truncated to 16 bytes, as on the upstream crate's `keccak` branch. Spec:
-  [docs/leanSphincs-S-keccak.md](docs/leanSphincs-S-keccak.md).
+- **leanSphincs, leanSphincs-S and leanSphincs-f** (`src/keccak/LeanSphincsAsm.sol`, `LeanSphincs-SAsm.sol`,
+  `LeanSphincs-FAsm.sol`): leanSphincs's own 16-byte tweak, `keccak256(P ‖ tweak ‖ payload)` truncated to 16 bytes,
+  as on the upstream crate's `keccak` branch. Specs: [leanSphincs](docs/leanSphincs-keccak.md) (the upstream crate
+  is normative), [leanSphincs-S](docs/leanSphincs-S-keccak.md), [leanSphincs-f](docs/leanSphincs-f-keccak.md).
 
 Key derivation (Rust/WASM signer): BIP-39 mnemonic → `HMAC-SHA512("sphincs-c6-v1", seed)` for the SPHINCs- keys,
 and BIP-32 `m/44'/60'/0'/0/0` for the independent ECDSA key. More detail: [CLAUDE.md](CLAUDE.md),
@@ -120,7 +131,9 @@ and BIP-32 `m/44'/60'/0'/0/0` for the independent ECDSA key. More detail: [CLAUD
 | C7 / C13 | `script/signer.py` (Python, `c7` / `c13`), `signers/signer-wasm` (Rust/WASM, C13 only, BIP-39) |
 | C12 | `script/spx_fips_signer.py` |
 | SLH-DSA-128-24 | `signers/sphincsplus-128-24` (C, SHA-2), `signers/noble-slh-dsa` (JS), `signers/slhvk-sha2-128-24` (GPU), `signers/jardin-keccak-128-24` (C, Keccak twin) |
+| leanSphincs | `signers/leansphincs-keccak` (Rust, `lsk`, tiered key files), `script/leansphincs_s_signer.py --variant regular` (Python) |
 | leanSphincs-S | `signers/leansphincs-s-keccak` (Rust, `lssk`, tiered key files), `script/leansphincs_s_signer.py` (Python) |
+| leanSphincs-f | `signers/leansphincs-f-keccak` (Rust, `lsfk`, tiered key files), `script/leansphincs_s_signer.py --variant f` (Python) |
 
 Which signer targets which verifier, and how they are cross-checked: [signers/README.md](signers/README.md).
 
@@ -130,7 +143,9 @@ Which signer targets which verifier, and how they are cross-checked: [signers/RE
 forge build
 pip install eth-account eth-abi requests pycryptodome
 forge test --no-match-contract '^SLH_DSA_SHA2_128_24_(Test|CalldataGas)$'   # skips the two slow NIST-parameter signs
+(cd signers/leansphincs-keccak && cargo test --release)
 (cd signers/leansphincs-s-keccak && cargo test --release)
+(cd signers/leansphincs-f-keccak && cargo test --release)
 (cd signers/signer-wasm && cargo test --release -- --ignored)
 FOUNDRY_TEST=legacy/test forge test   # frozen legacy verifiers (includes two slow NIST-parameter SLH-DSA-Keccak signs)
 ```
