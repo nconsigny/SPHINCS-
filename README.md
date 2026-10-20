@@ -162,10 +162,15 @@ minutes per signature; the pinned KAT suites cover the verifier without it.
 | Sepolia | SphincsAccount (ERC-4337 hybrid, C13) | [`0x01280171…0dD4`](https://sepolia.etherscan.io/address/0x01280171F336869e9c96F9e6eb674b1548D10dD4) |
 | Sepolia | SLH-DSA-SHA2-128-24 verifier (FIPS 205 external) | [`0x12B712ad…0553`](https://sepolia.etherscan.io/address/0x12B712ad3ca6D81d4B3690B2f93420cd65EA0553) |
 | Sepolia | SLH-DSA-Keccak-128-24 verifier | [`0x2Ac9Ec4a…6205`](https://sepolia.etherscan.io/address/0x2Ac9Ec4a2A062aFc1be718e77ec3300D087E6205) |
+| Sepolia | leanSphincs verifier | [`0x4B1CF99F…0db0`](https://sepolia.etherscan.io/address/0x4B1CF99FD1C9dfD6F3F4BE6751E902F71C6f0db0) |
+| Sepolia | leanSphincs-s verifier | [`0x7E406078…16a7`](https://sepolia.etherscan.io/address/0x7E4060786AE34E143978dF07da82A388292316a7) |
+| Sepolia | leanSphincs-f verifier | [`0xd7597406…011B`](https://sepolia.etherscan.io/address/0xd75974064757B7C3C7988AbD38B3D722E0d8011B) |
+| ethrex privacy testnet (8141) | leanSphincs / -s / -f frame accounts (EIP-8141) | [`0x874f5ba1…eDD7`](https://dora.privacy.ethrex.xyz/address/0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7), [`0x8e2812cc…aE62`](https://dora.privacy.ethrex.xyz/address/0x8e2812cc597389b0E6522E610eAaeD635acbaE62), [`0xaD6b0De1…60b7`](https://dora.privacy.ethrex.xyz/address/0xaD6b0De1E1b5792AF346E192346D120B484560b7) |
 
 EntryPoint v0.9 on Sepolia: `0x433709009B8330FDa32311DF1C2AFA402eD8D009`. The C13 verifier's code is unchanged since that deploy, and
 the SLH-DSA-SHA2 one verified the pinned KAT (`signers/slhvk-sha2-128-24/kat-counter0.json`). Older deployments, sample transactions and the (now defunct) ethrex EIP-8141 devnet:
-[docs/deployments.md](docs/deployments.md).
+[docs/deployments.md](docs/deployments.md), which also lists the leanSphincs verify and frame transactions
+(frame txs: 288K gas for leanSphincs-s, 320K for -f, 385K for leanSphincs; `script/send_frame_tx_leansphincs.py`).
 
 ## Formal verification
 

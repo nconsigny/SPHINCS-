@@ -4,6 +4,41 @@ Every deployment recorded in the README so far (moved here unchanged when the RE
 
 EntryPoint v0.9: `0x433709009B8330FDa32311DF1C2AFA402eD8D009` (Sepolia)
 
+## 2026-10-20: leanSphincs, leanSphincs-s, leanSphincs-f
+
+Built from `main` at `e22c861`; each deployed runtime is byte-identical to the build.
+
+**Sepolia, verifiers only.** Each verified a KAT signature (fixture vector 3, message `0xdeadbeef…`) in a real
+transaction. The tx gas is the calldata floor (about 64 gas per calldata byte), not the verifier's execution
+(39–53K).
+
+| Variant | Verifier | Verify tx | Tx gas |
+|---|---|---|---|
+| leanSphincs | [`0x4B1CF99FD1C9dfD6F3F4BE6751E902F71C6f0db0`](https://sepolia.etherscan.io/address/0x4B1CF99FD1C9dfD6F3F4BE6751E902F71C6f0db0) | [`0xb59d6e9a…`](https://sepolia.etherscan.io/tx/0xb59d6e9a77e7d5791631d614334756ead97e45f2a5476f5a5352a8fa4d673a23) | 390,040 |
+| leanSphincs-s | [`0x7E4060786AE34E143978dF07da82A388292316a7`](https://sepolia.etherscan.io/address/0x7E4060786AE34E143978dF07da82A388292316a7) | [`0xd81ea86d…`](https://sepolia.etherscan.io/tx/0xd81ea86d6d9f53b9b6944462ec8eb6d2f9f185128884951c8c7be5cfc7020b81) | 293,784 |
+| leanSphincs-f | [`0xd75974064757B7C3C7988AbD38B3D722E0d8011B`](https://sepolia.etherscan.io/address/0xd75974064757B7C3C7988AbD38B3D722E0d8011B) | [`0xbf3677bc…`](https://sepolia.etherscan.io/tx/0xbf3677bccba221825c3d60f573cf135ce83f006f6bb54a5f690e896f1b2d1f1a) | 324,504 |
+
+**ethrex privacy testnet (chain 8141, `rpc1.privacy.ethrex.xyz`), full EIP-8141 frame transactions.** This network runs
+the current EIP-8141 opcodes (SIGDATACOPY at `0xb5`), so `src/SphincsFrameVerify.yul` runs unchanged. Shared frame
+module [`0xAA481E835ec1b82E528d6D36D432F9Af440B4295`](https://dora.privacy.ethrex.xyz/address/0xAA481E835ec1b82E528d6D36D432F9Af440B4295). One
+`SphincsFrameAccount` per variant, each holding a fresh Light-tier (2^13) key. Each tx has two frames: VERIFY (the
+account checks its leanSphincs signature over `compute_sig_hash(tx)`, carried in an ARBITRARY signature entry, and
+approves execution and payment), then SENDER (0.00001 ETH to `0x…dEaD`). The account pays its own gas.
+
+| Variant | Verifier | Frame account | Frame tx | VERIFY frame | Tx gas |
+|---|---|---|---|---|---|
+| leanSphincs | [`0x6594157F…F5C9`](https://dora.privacy.ethrex.xyz/address/0x6594157F1d690CbeBAA93dD13579FEb14E81F5C9) | [`0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7`](https://dora.privacy.ethrex.xyz/address/0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7) | [`0x86d8c16f…`](https://dora.privacy.ethrex.xyz/tx/0x86d8c16fcf091851de57dcd08eddd7fd91ee34f180568506308cdd5241764404) | 60,767 | 385,322 |
+| leanSphincs-s | [`0xae3bA3e1…481a`](https://dora.privacy.ethrex.xyz/address/0xae3bA3e1DC1bD3866608ECA1498D3e9263B3481a) | [`0x8e2812cc597389b0E6522E610eAaeD635acbaE62`](https://dora.privacy.ethrex.xyz/address/0x8e2812cc597389b0E6522E610eAaeD635acbaE62) | [`0x56f1d1fd…`](https://dora.privacy.ethrex.xyz/tx/0x56f1d1fd23119f716244f55956047fd0b8b650b7e51c52752ec5a272d7307993) | 46,899 | 288,042 |
+| leanSphincs-f | [`0x89FCf098…14D4`](https://dora.privacy.ethrex.xyz/address/0x89FCf098dCf39fc3445a435504162f91bECa14D4) | [`0xaD6b0De1E1b5792AF346E192346D120B484560b7`](https://dora.privacy.ethrex.xyz/address/0xaD6b0De1E1b5792AF346E192346D120B484560b7) | [`0x97b498ee…`](https://dora.privacy.ethrex.xyz/tx/0x97b498ee82654113c62c88934d827897d33e921a6050ff641efb95cbb99999dc) | 51,948 | 319,786 |
+
+Frame tx gas is the EIP-7976 calldata floor (16 gas per token, every byte 4 tokens) plus 19,050 fixed (base 12,000,
+475 per frame, 100 per ARBITRARY entry, 6,000 for the value transfer): about 21.4K + 64 gas per signature byte.
+The VERIFY frame's execution (47–61K) stays far below that floor. Send one with
+`script/send_frame_tx_leansphincs.py <rpc> <account> <signer> <key file> <recipient> <wei>`. It uses the
+`hegota-testnet` wire format of lambdaclass/ethrex, signs with `lsk` / `lssk` / `lsfk sign-key`, and dry-runs the
+tx with `ethrex_simulateFrameTransaction` first. The Hegotá devnet (chain 3151908) has SIGDATACOPY at `0xBA`
+instead and would need a module built with that byte.
+
 ## 2026-06-04 redeploy: new accounts & factories
 
 Hardened C13 verifiers (commit 16732a7), new C13 `SphincsAccountFactory` instances and freshly-deployed accounts (each account funded 0.1 ETH):
