@@ -1,6 +1,6 @@
 # leansphincs-s-keccak
 
-Rust signer for **leanSphincs-S over keccak256**, the scheme the on-chain verifier
+Rust signer for **leanSphincs-s over keccak256**, the scheme the on-chain verifier
 `src/keccak/LeanSphincs-SAsm.sol` checks. The spec is
 [`docs/leanSphincs-S-keccak.md`](../../docs/leanSphincs-S-keccak.md).
 
@@ -28,7 +28,7 @@ the one-time key at `e` is `Th(P, address(ENC, 0, 0, e), tops ‖ LE32(c))` over
 input is 4 permutations for the verifier; the signer absorbs its 3 whole blocks once and pays one permutation per
 counter.
 
-Against leanSphincs-23 (`signers/leansphincs23-keccak`), leanSphincs-S has one more tree level and the merged encoding;
+Against leanSphincs-23 (`signers/leansphincs23-keccak`), leanSphincs-s has one more tree level and the merged encoding;
 everything else (tweak, `P`, secrets, digest layout, FORS positions, serialization, surrogates, randomizer grind) is
 the same. Its public key at `key_gen(seed(1), 11)` is the one upstream's `known_answer` pins, since at `h = 26` the key
 depends on neither the FORS parameters, nor `T`, nor the encoding. **Never use one seed for both schemes**: they derive
@@ -69,7 +69,7 @@ which reads the seed from a private file or from standard input. No `lssk` error
 
 ## One-signer tiers
 
-The tiers of sphincs-art's "One signer, leanSphincs-S" table, FORS variant (`src/tiers.rs`, `src/keyfile.rs`). The key
+The tiers of sphincs-art's "One signer, leanSphincs-s" table, FORS variant (`src/tiers.rs`, `src/keyfile.rs`). The key
 is generated once and stored in a key file with a node cache of bounded size. Each signature recomputes only what is not
 cached:
 
@@ -178,7 +178,7 @@ high-water mark can miss a short-lived peak.
   that the other key's signatures and surrogates make public. No secret is needed, so the stronger key falls to the
   weaker one's lifetime. Use a fresh, independent seed for every key. `keygen` cannot detect reuse, and nothing in the
   scheme or the key derivation changes this.
-- **One seed, one scheme.** Never use a leanSphincs-23 seed for leanSphincs-S, or the reverse: their one-time keys
+- **One seed, one scheme.** Never use a leanSphincs-23 seed for leanSphincs-s, or the reverse: their one-time keys
   are the same, and they sign a FORS key with them there and FORS tops here. The key files cannot be confused (another
   magic), but the seed is the same 32 bytes.
 - **The key file is the secret.** It holds the seed in the clear: keep it mode `0600` and back it up like a private key.
@@ -247,7 +247,7 @@ keygen 1,908,763 / 244,318,221 / 15,636,365,313, mean signing 159,007 / 155,448 
 lifetimes are the cover estimate at 127 bits, 43.7K / 3.05M / 108M, each clearing the tier's design target (20K / 2^21
 / 2^23) by the sweep's 25% margin; the page's newer figures, 38.2K / 2.87M / 103M, lower the estimate by the
 proposal's proof gaps and are quoted, not recomputed. The repo docs rate Full at 2^26, the page's headline lifetime for
-leanSphincs-S, which both estimates also clear by that margin (spec §14). It needs only the standard library.
+leanSphincs-s, which both estimates also clear by that margin (spec §14). It needs only the standard library.
 
 ## Tests
 

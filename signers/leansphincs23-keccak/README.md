@@ -4,7 +4,7 @@ Rust signer for **leanSphincs-23 over keccak256**, the scheme the on-chain verif
 `legacy/src/LeanSphincs-23Asm.sol` checks. The spec is
 [`legacy/docs/leanSphincs-23-keccak.md`](../../legacy/docs/leanSphincs-23-keccak.md).
 
-**Legacy (verifier in `legacy/src`).** leanSphincs-23 is superseded by leanSphincs-S
+**Legacy (verifier in `legacy/src`).** leanSphincs-23 is superseded by leanSphincs-s
 ([`signers/leansphincs-s-keccak`](../leansphincs-s-keccak)); this crate stays here, maintained, to keep the
 legacy verifier's KAT fixture and Forge suites reproducible.
 

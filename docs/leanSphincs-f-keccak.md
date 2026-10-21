@@ -1,19 +1,19 @@
 # leanSphincs-f over keccak256
 
-leanSphincs-f is a re-parameterization of [leanSphincs-S](leanSphincs-S-keccak.md) chosen for faster signing:
+leanSphincs-f is a re-parameterization of [leanSphincs-s](leanSphincs-S-keccak.md) chosen for faster signing:
 smaller FORS trees and a WOTS+C target sum closer to the mean, paid for with a larger signature and more
-verification work, within a 290-permutation verification budget. It keeps leanSphincs-S's full-key and Ledger
+verification work, within a 290-permutation verification budget. It keeps leanSphincs-s's full-key and Ledger
 lifetime floors (≥ 100M and ≥ 20K signatures, sphincs-art estimates). The on-chain verifier is
 `src/keccak/LeanSphincs-FAsm.sol`.
 
-**Everything is leanSphincs-S** (`docs/leanSphincs-S-keccak.md`: the upstream crate's `keccak` branch construction,
+**Everything is leanSphincs-s** (`docs/leanSphincs-S-keccak.md`: the upstream crate's `keccak` branch construction,
 Ethereum Keccak-256, the 16-byte tweak, no FORS key hash, the merged WOTS+C encoding, `h = 26`, keys, pruning,
 randomizer grind, serialization order, interface, tiers) **except the items below.** Section numbers refer to that
 spec.
 
-## Differences from leanSphincs-S
+## Differences from leanSphincs-s
 
-| Spec § | leanSphincs-S | **leanSphincs-f** |
+| Spec § | leanSphincs-s | **leanSphincs-f** |
 |---|---|---|
 | §1 FORS `a` / `k` | 12 / 13 | **9 / 20** |
 | §1 WOTS+C target sum `T` | 128 | **122** (`P[Σx = 122] ≈ 6.38·10⁻⁴`, about 1,566 tries) |
@@ -37,11 +37,11 @@ An inadmissible counter returns `false` after the first 182 calls (digest, FORS,
 
 Signing: the encoding's fixed part `P ‖ address ‖ tops` is 672 bytes, four whole 136-byte blocks absorbed once per
 signature; the counter falls in the fifth block, one permutation per counter tried. FORS rebuilds 20 trees of 512
-leaves per signature (25,560 permutations, against 133,094 for leanSphincs-S).
+leaves per signature (25,560 permutations, against 133,094 for leanSphincs-s).
 
 ## Lifetimes and tiers
 
-The tiers are leanSphincs-S's (Light 2^13 / 16 KiB, Standard 2^20 / 1 MiB, Full 2^26 / 16 MiB). Lifetimes are the
+The tiers are leanSphincs-s's (Light 2^13 / 16 KiB, Standard 2^20 / 1 MiB, Full 2^26 / 16 MiB). Lifetimes are the
 sphincs-art method (the cover estimate, lowered by the proposal's proof gap at the same subtree size: 13% / 6% / 4%),
 estimates, not proofs: **31.5K** (Light, rated 20K), **2.78M** (Standard, rated 2²¹), **119M** (Full, rated 2²⁶).
 Expected signing work, in Keccak-f permutations: 38.4K (Light), 34.8K (Standard), 57.1K (Full).
@@ -60,7 +60,7 @@ model's counts.
 
 ## Key separation
 
-leanSphincs, leanSphincs-S and leanSphincs-f derive `P`, the WOTS and FORS secrets and the surrogates identically
+leanSphincs, leanSphincs-s and leanSphincs-f derive `P`, the WOTS and FORS secrets and the surrogates identically
 from the seed, and nothing in a hash input names the parameter set. One seed is one key of one variant: never reuse
 a seed across variants or tiers. The key files cannot be confused (each variant's has its own magic, the §14 row),
 but the seed is the same 32 bytes, and no signer can detect the reuse.

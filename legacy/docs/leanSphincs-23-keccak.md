@@ -1,6 +1,6 @@
 # leanSphincs-23 over keccak256
 
-> **Retired (legacy).** leanSphincs-23 is superseded by leanSphincs-S (one more tree level, `h = 26`, and the
+> **Retired (legacy).** leanSphincs-23 is superseded by leanSphincs-s (one more tree level, `h = 26`, and the
 > upstream `keccak` branch's merged encoding): see [`docs/leanSphincs-S-keccak.md`](../../docs/leanSphincs-S-keccak.md).
 > The verifier now lives in `legacy/src/LeanSphincs-23Asm.sol`, its Forge suites in `legacy/test/` (run with
 > `FOUNDRY_TEST=legacy/test forge test --match-contract LeanSphincs23`); the signers

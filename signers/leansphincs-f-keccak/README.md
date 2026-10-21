@@ -8,7 +8,7 @@ spec's own section numbers do).
 
 It is a port of Tom Wambsgans' upstream leanSphincs crate on its **`keccak` branch**
 ([leanXMSS-leanSPHINCS-candidates](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates), `crates/sphincs`
-on branch `keccak`, MIT OR Apache-2.0, see `LICENSE.upstream`), by way of this repo's leanSphincs-S signer
+on branch `keccak`, MIT OR Apache-2.0, see `LICENSE.upstream`), by way of this repo's leanSphincs-s signer
 (`signers/leansphincs-s-keccak`), whose tiers, key file and CLI it keeps. The module layout and names are upstream's.
 Diffed against the upstream keccak branch, the changes are:
 
@@ -31,12 +31,12 @@ of each tree (`ForsTops`, `encoding_midstate`, `encode_from`, `encode`, `wots_en
 `fors_recover`). The 676-byte input is 5 permutations for the verifier; the signer absorbs its 4 whole blocks once and
 pays one permutation per counter.
 
-Against leanSphincs-S (`signers/leansphincs-s-keccak`), leanSphincs-f has `a = 9`, `k = 20`, `T = 122` and the digest
+Against leanSphincs-s (`signers/leansphincs-s-keccak`), leanSphincs-f has `a = 9`, `k = 20`, `T = 122` and the digest
 layout and signature offsets that follow; everything else (tweak, `P`, secrets, leaf-index field, FORS position
 packing, serialization order, surrogates, randomizer grind, tiers, key file layout) is the same. Its public key at
-`key_gen(seed(1), 11)` is the one upstream's `known_answer` pins, and leanSphincs-S's, since at `h = 26` the key depends
+`key_gen(seed(1), 11)` is the one upstream's `known_answer` pins, and leanSphincs-s's, since at `h = 26` the key depends
 on neither the FORS parameters, nor `T`, nor the encoding. **Never use one seed for two leanSphincs variants**
-(leanSphincs, leanSphincs-S, leanSphincs-f): they derive the same one-time keys, and each would sign a different
+(leanSphincs, leanSphincs-s, leanSphincs-f): they derive the same one-time keys, and each would sign a different
 encoding with them (the f spec, "Key separation").
 
 The crate adds the one-signer tiers (below): a pruned key generated once and stored with a bounded node cache, which
@@ -63,10 +63,10 @@ cargo build --release
 
 `b` is the height of the kept subtree (pruned key). `b = 26` is a full key, which costs about 1.52·10¹⁰ keccak calls
 (`2^26 · 226`), or 1.56·10¹⁰ Keccak-f permutations (`2^26 · 233`, sphincs-art's 15.6B), to generate: the key is
-leanSphincs-S's. The verifier cannot tell a pruned key from a full one. The key words are high-aligned, which is the
+leanSphincs-s's. The verifier cannot tell a pruned key from a full one. The key words are high-aligned, which is the
 form the verifier takes: `pkSeed = P ‖ 0^16` and `pkRoot = root ‖ 0^16`. Each run of `sign` regenerates the kept
 subtree, `2^b · 226` keccak calls, grinds about `2^(26 − b)` randomizers and builds the 20 FORS trees (25,560 calls,
-against leanSphincs-S's 133,094).
+against leanSphincs-s's 133,094).
 
 `sign` and `kat` take the seed on the command line, where every local user can read it in the process list and the
 shell history keeps it. They are for test vectors and the Forge FFI tests. A real key goes through `keygen` (below),
@@ -74,10 +74,10 @@ which reads the seed from a private file or from standard input. No `lsfk` error
 
 ## One-signer tiers
 
-The tiers of sphincs-art's "One signer, leanSphincs-S" table, FORS variant, which leanSphincs-f keeps (`src/tiers.rs`,
+The tiers of sphincs-art's "One signer, leanSphincs-s" table, FORS variant, which leanSphincs-f keeps (`src/tiers.rs`,
 `src/keyfile.rs`). The key is generated once and stored in a key file with a node cache of bounded size. Each signature
-recomputes only what is not cached. At `h = 26` with leanSphincs-S's WOTS leaf, the plans, the auth-path costs and the
-keygen costs are leanSphincs-S's:
+recomputes only what is not cached. At `h = 26` with leanSphincs-s's WOTS leaf, the plans, the auth-path costs and the
+keygen costs are leanSphincs-s's:
 
 | Tier       | `b` (kept subtree) | Cache  | Plan             | Auth path / sig: calls | permutations | Keygen calls   | Keygen permutations |
 |------------|-------------------:|-------:|------------------|-----------------------:|-------------:|---------------:|--------------------:|
@@ -143,8 +143,8 @@ and 524,288 calls (as many permutations) for Light, Standard and Full. The model
 **Memory.** `keygen_cached` holds the cache, the `2^t` chunk roots and a `b + 1`-node stack per thread. Writing the key
 file streams it (header, surrogates, cache, then the checksum computed on the way), so `lsfk keygen` holds one copy of
 the cache. Loading reads the cache straight into place and checks it without a second copy. On top of the loaded key,
-signing holds the FORS leaves and trees, whatever the cache: `20 · (512 + 1,022) · 16` B, about 0.49 MB (leanSphincs-S's
-13 trees of height 12 take 2.56 MB). The keygen, key file and signing code are leanSphincs-S's, whose memory figures
+signing holds the FORS leaves and trees, whatever the cache: `20 · (512 + 1,022) · 16` B, about 0.49 MB (leanSphincs-s's
+13 trees of height 12 take 2.56 MB). The keygen, key file and signing code are leanSphincs-s's, whose memory figures
 are the leanSphincs-23 crate's measurements (a counting allocator at `b ≤ 13`); they were not re-measured here. By the
 same accounting, Standard needs about 1 MiB of heap for keygen and about 1.5 MB for `sign-key`, and Full about 16 MiB
 and about 17.3 MB.
@@ -185,7 +185,7 @@ high-water mark can miss a short-lived peak.
   that the other key's signatures and surrogates make public. No secret is needed, so the stronger key falls to the
   weaker one's lifetime. Use a fresh, independent seed for every key. `keygen` cannot detect reuse, and nothing in the
   scheme or the key derivation changes this.
-- **One seed, one scheme.** Never use one seed for two leanSphincs variants (leanSphincs, leanSphincs-S,
+- **One seed, one scheme.** Never use one seed for two leanSphincs variants (leanSphincs, leanSphincs-s,
   leanSphincs-f, or the retired leanSphincs-23): their one-time keys are the same, and each variant signs different
   FORS tops (leanSphincs-23 a FORS key) with them. The key files cannot be confused (each has its own magic), but the
   seed is the same 32 bytes.
@@ -217,7 +217,7 @@ offset         length          field
 end - 32       32              keccak256 of every byte before it
 ```
 
-The layout is leanSphincs-S's (and leanSphincs-23's at `h = 26`), under another magic: `lsfk` refuses a key file of
+The layout is leanSphincs-s's (and leanSphincs-23's at `h = 26`), under another magic: `lsfk` refuses a key file of
 `lssk` (`"LS-SKKEY"`), `lsk` (`"LS-KKKEY"`) or `ls23k` (`"LS23KKEY"`) as not a key file, before reading anything else,
 and their signers refuse this one. A Light key file is 16,736 B, a Standard one 1,048,800 B, a Full one 16,777,344 B; no
 key file is longer than 2,147,483,776 B (a full key caching its whole tree). The seed is stored in the clear, so the
@@ -257,7 +257,7 @@ permutations it reproduces that script and the f spec: verification 290, keygen 
 and the times at the page's device rates. Its lifetimes are the cover estimate at 127 bits, 36.2K / 2.95M / 123M,
 each clearing the tier's design target (20K / 2^21 / 2^23) and the f spec's rating (20K / 2^21 / 2^26) by the sweep's
 25% margin. Lowered by the proposal's proof gaps (13% / 6% / 4%) they are the f spec's 31.5K / 2.78M / 119M (rounded
-to nearest, as the f spec and the parameter search print them), which keep leanSphincs-S's floors: at least 20K for
+to nearest, as the f spec and the parameter search print them), which keep leanSphincs-s's floors: at least 20K for
 Light and 100M for a full key. It needs only the standard library.
 
 ## Tests
@@ -279,7 +279,7 @@ The tests check:
   least admissible counter
 - tampering with every signature field, and other counters
 - a known-answer vector for `key_gen(seed(1), 11)` and `m[i] = 7i`: public key
-  `63b118353523319f8f74f387824956482e582128e480149accc2ed4f19edcd00` (upstream's, and leanSphincs-S's),
+  `63b118353523319f8f74f387824956482e582128e480149accc2ed4f19edcd00` (upstream's, and leanSphincs-s's),
   `keccak256(sig)` `5e127f8e8428c845624cfb0205d78398c078956ede0136300d0c99d87e4702db`, counter 5,553 (also recomputed
   from the spec by `crosscheck.py`)
 - the WOTS+C mean number of encoding tries, about 1,566

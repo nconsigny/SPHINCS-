@@ -27,7 +27,7 @@ and `script/signer.py` variants `c6` / `c8` / `c10` / `c11-jardin`) are unchange
 legacy tests FFI-call them by repo-root path (`script/...`), so they stay in
 `script/`. The migrated FIPS C12 has its own signer at `script/spx_fips_signer.py`.
 
-**leanSphincs-23** (`LeanSphincs-23Asm.sol`) was retired here when leanSphincs-S
+**leanSphincs-23** (`LeanSphincs-23Asm.sol`) was retired here when leanSphincs-s
 (`src/keccak/LeanSphincs-SAsm.sol`, spec `docs/leanSphincs-S-keccak.md`) superseded it:
 the sphincs-art leanSphincs set gained one tree level (h = 25 → 26, rated 2^26 for the
 Full tier) and moved to the upstream crate's `keccak` branch construction, whose merged
@@ -39,7 +39,7 @@ Its signers stay where they are: the Rust crate `signers/leansphincs23-keccak` (
 whose `make_kat_fixture.py` now writes the fixture under `legacy/test/fixtures`) and the
 Python `script/leansphincs23_signer.py`; the CI `leansphincs23` job still runs their
 cargo tests, the Rust ↔ Python crosscheck, `make_kat_fixture.py --check` and these Forge
-suites. Never reuse a leanSphincs-23 seed for leanSphincs-S.
+suites. Never reuse a leanSphincs-23 seed for leanSphincs-s.
 
 ## What's here
 
@@ -86,9 +86,9 @@ are repo-root-relative. For one suite, e.g. leanSphincs-23:
 
 ## Why they're kept
 
-leanSphincs-23 is kept so the leanSphincs-S delta (`docs/leanSphincs-S-keccak.md`) stays
+leanSphincs-23 is kept so the leanSphincs-s delta (`docs/leanSphincs-S-keccak.md`) stays
 checkable against a working predecessor, and because its signer crate is the base the
-leanSphincs-S crate was derived from.
+leanSphincs-s crate was derived from.
 
 The JARDIN-layout verifiers here share one 32-byte ADRS layout and one set of
 tweakable hash primitives (`script/jardin_primitives.py::th / th_pair /

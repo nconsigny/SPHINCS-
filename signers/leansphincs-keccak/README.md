@@ -9,7 +9,7 @@ It is a port of the upstream leanSphincs crate on its **`keccak` branch**
 on branch `keccak`, MIT OR Apache-2.0, see `LICENSE.upstream`), **with nothing re-parameterized**: `h = 26`, `a = 10`,
 `k = 24`, WOTS+C with `w = 4`, 64 chains and `T = 120`, upstream's two-call message digest, a 5,684-byte signature and
 a 32-byte public key. The upstream crate is normative: its `known_answer` test passes here unchanged. The tiers, the
-key file and the CLI are those of this repo's leanSphincs-S signer (`signers/leansphincs-s-keccak`). The module layout
+key file and the CLI are those of this repo's leanSphincs-s signer (`signers/leansphincs-s-keccak`). The module layout
 and names are upstream's. Diffed against the upstream keccak branch, the changes are:
 
 - the hash: Ethereum keccak256 (`0x01` padding) via `tiny-keccak`, where upstream has its own Keccak-256 crate. A
@@ -41,7 +41,7 @@ Verification costs a constant **342 keccak256 calls**, or **354 Keccak-f permuta
 `VERIFY_PERMUTATIONS`, the sphincs.art figure): digest 2, FORS 24·(1 + 9), encoding 1 call of 6 permutations, chains
 72 (`192 − 120`), leaf 1 call of 8, path 26. An inadmissible counter stops it after 243 calls (248 permutations).
 
-leanSphincs, leanSphincs-S and leanSphincs-f derive `P`, the one-time keys, the FORS secrets and the surrogates from
+leanSphincs, leanSphincs-s and leanSphincs-f derive `P`, the one-time keys, the FORS secrets and the surrogates from
 the seed in the same way: their public key at one seed and `b` is the same (at `key_gen(seed(1), 11)`, the pk that
 upstream's `known_answer` pins). **Never use one seed for two variants**: each would sign a different encoding with
 the same one-time keys (the spec, "Key separation").
@@ -67,7 +67,7 @@ cannot tell a pruned key from a full one. The key words are high-aligned, which 
 `pkSeed = P ‖ 0^16` and `pkRoot = root ‖ 0^16`. Each run of `sign` regenerates the kept subtree, `2^b · 226` keccak
 calls, and grinds about `2^(26 − b)` randomizers. On 8 cores of a busy shared host (load average about 55 on 32 cores),
 `sign` took about 0.3 s at `b = 10` and 0.7 s at `b = 13`, a little less than `lssk` under the same load (its FORS is
-61K calls against leanSphincs-S's 133K).
+61K calls against leanSphincs-s's 133K).
 
 `sign` and `kat` take the seed on the command line, where every local user can read it in the process list and the
 shell history keeps it. They are for test vectors and the Forge FFI tests. A real key goes through `keygen` (below),
@@ -86,7 +86,7 @@ cached:
 | `full`     | 26 (whole tree)    | 16 MiB | top levels 7..26 | 28,927                 | 29,823       | 15,166,603,264 | 15,636,365,312      | 1.15B    |
 
 The lifetimes are the proposal's, proved in Lean (the full tree: `2^30`). The tree, the WOTS leaf, the plans and the
-keygen are leanSphincs-S's; only FORS, `T` and the digest differ, so only the signing cost does. The page's Keccak
+keygen are leanSphincs-s's; only FORS, `T` and the digest differ, so only the signing cost does. The page's Keccak
 figures for these tiers are keygen 1.91M / 244M / 15.6B permutations and signing 74K / 70K / 92K permutations, which
 `tier_model.py` reproduces (it transcribes sphincs-art's `scripts/keccak_model.py`, "Tom FORS (check 354)": 73,459 /
 69,900 / 92,204; below). Light is the page's Ledger Nano S+ class tier: its 16 KiB cache is the page's budget for such
@@ -146,7 +146,7 @@ permutations) for Light, Standard and Full. The model counts neither.
 file streams it (header, surrogates, cache, then the checksum computed on the way), so `lsk keygen` holds one copy of
 the cache. Loading reads the cache straight into place and checks it without a second copy. Signing holds the 24 FORS
 trees and their leaves, about 1.18 MB on top of the loaded key whatever the cache (`24 · (1024 + 2046) · 16` bytes; the
-leanSphincs-S crate's 13 trees of `2^12` leaves take 2.56 MB). These are counts, not measurements; the leanSphincs-23
+leanSphincs-s crate's 13 trees of `2^12` leaves take 2.56 MB). These are counts, not measurements; the leanSphincs-23
 crate measured the same code with a counting allocator at `b ≤ 13`. By the same accounting, Standard needs about 1 MiB
 of heap for keygen and about 2.2 MB for `sign-key`, and Full about 16 MiB and about 18 MB.
 
@@ -186,7 +186,7 @@ high-water mark can miss a short-lived peak.
   that the other key's signatures and surrogates make public. No secret is needed, so the stronger key falls to the
   weaker one's lifetime. Use a fresh, independent seed for every key. `keygen` cannot detect reuse, and nothing in the
   scheme or the key derivation changes this.
-- **One seed, one scheme.** Never use a seed for two leanSphincs variants (leanSphincs, leanSphincs-S, leanSphincs-f,
+- **One seed, one scheme.** Never use a seed for two leanSphincs variants (leanSphincs, leanSphincs-s, leanSphincs-f,
   leanSphincs-23): their one-time keys are the same, and each signs a different encoding with them. The key files
   cannot be confused (each variant has its own magic), but the seed is the same 32 bytes.
 - **The key file is the secret.** It holds the seed in the clear: keep it mode `0600` and back it up like a private key.
@@ -217,7 +217,7 @@ offset         length          field
 end - 32       32              keccak256 of every byte before it
 ```
 
-The layout is leanSphincs-S's and leanSphincs-f's, under another magic: `lsk` refuses an `lssk` (`"LS-SKKEY"`),
+The layout is leanSphincs-s's and leanSphincs-f's, under another magic: `lsk` refuses an `lssk` (`"LS-SKKEY"`),
 `lsfk` (`"LS-FKKEY"`) or `ls23k` (`"LS23KKEY"`) key file as not a key file, before reading anything else, and those
 signers refuse this one. A Light key file is 16,736 B, a Standard one 1,048,800 B, a Full one 16,777,344 B; no key
 file is longer than 2,147,483,776 B (a full key caching its whole tree). The seed is stored in the clear, so the file
@@ -341,7 +341,7 @@ the Forge tests use to check the `Σ > T` side of the target-sum check. The outp
 the committed file is stale. Like `crosscheck.py`, it refuses an `lsk` older than the crate sources, so `--no-build`
 cannot write a fixture the sources do not reproduce. It also refuses a vector set without both values of bit 25 of
 `idx` and of bit 9 of `u_23`: each bit picks between two verifier placements (the last auth-path node as the left or
-the right child; the order of the last FORS tree's top pair, the last store before the counter), as leanSphincs-S's
+the right child; the order of the last FORS tree's top pair, the last store before the counter), as leanSphincs-s's
 fixture guards bit 25 of `idx` and bit 11 of `u_12`.
 
 ```sh
@@ -349,7 +349,7 @@ forge test --match-contract '^LeanSphincsTest$|^SphincsAccountLeanSphincsTest$' 
 ```
 
 `test/LeanSphincsTest.t.sol` and `test/SphincsAccountLeanSphincsTest.t.sol` read the fixture and sign with `lsk`.
-`--match-contract` is a regex: anchor it, since `LeanSphincs` alone also matches the leanSphincs-S and leanSphincs-f
+`--match-contract` is a regex: anchor it, since `LeanSphincs` alone also matches the leanSphincs-s and leanSphincs-f
 suites. The `leansphincs` CI job builds `lsk` and runs the cargo tests (release and debug), the crosscheck, the Python
 signer's `--variant regular --selftest` (with the upstream known answer), `make_kat_fixture.py --check`, a Light-tier
 `keygen` + `sign-key` against `sign`, `tier_model.py --check` and `--json`, and these Forge suites. The `solidity` job

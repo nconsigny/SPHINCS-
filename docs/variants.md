@@ -1,6 +1,6 @@
 # Variant details
 
-The full variant table, comparisons and layout notes that used to live in the README (moved here unchanged when the README was shortened; figures are as of October 2026). The README presents C7, C12, C13, SLH-DSA-Keccak-128-24, leanSphincs, leanSphincs-S and leanSphincs-f.
+The full variant table, comparisons and layout notes that used to live in the README (moved here unchanged when the README was shortened; figures are as of October 2026). The README presents C7, C12, C13, SLH-DSA-Keccak-128-24, leanSphincs, leanSphincs-s and leanSphincs-f.
 
 ## All variants
 
@@ -86,7 +86,7 @@ Live verifiers in `src/` are organized **one folder per hash function**: `src/ke
 | **FIPS ADRSc 22 B** (`src/sha/`) | C11-SHA, C13-SHA, C12-SHA, SLH-DSA-SHA2-128-24 | `layer1 ‖ tree8 ‖ type1 ‖ 12 B type-dependent` | SHA-256 (precompile 0x02) | `PK.seed(16) ‖ zeros(48) ‖ ADRSc(22) ‖ payload` |
 | _JARDIN 32 B (retired → `legacy/`)_ | SLH-DSA-Keccak-128-24; legacy C11/C12 originals | `layer4 ‖ tree8 ‖ type4 ‖ kp4 ‖ ci4 ‖ cp4 ‖ ha4` | keccak256 | `seed32 ‖ adrs32 ‖ payload` |
 
-The leanSphincs verifiers (`src/keccak/LeanSphincsAsm.sol`, `LeanSphincs-SAsm.sol`, `LeanSphincs-FAsm.sol`, and the retired `legacy/src/LeanSphincs-23Asm.sol`) are not in this table: they are not SPHINCS+ ADRS schemes, and they keep leanSphincs's own 16-byte tweak with input `P(16) ‖ tweak(16) ‖ payload` (see [leanSphincs](leanSphincs-keccak.md), [leanSphincs-S](leanSphincs-S-keccak.md), [leanSphincs-f](leanSphincs-f-keccak.md) and [leanSphincs-23](../legacy/docs/leanSphincs-23-keccak.md)).
+The leanSphincs verifiers (`src/keccak/LeanSphincsAsm.sol`, `LeanSphincs-SAsm.sol`, `LeanSphincs-FAsm.sol`, and the retired `legacy/src/LeanSphincs-23Asm.sol`) are not in this table: they are not SPHINCS+ ADRS schemes, and they keep leanSphincs's own 16-byte tweak with input `P(16) ‖ tweak(16) ‖ payload` (see [leanSphincs](leanSphincs-keccak.md), [leanSphincs-s](leanSphincs-S-keccak.md), [leanSphincs-f](leanSphincs-f-keccak.md) and [leanSphincs-23](../legacy/docs/leanSphincs-23-keccak.md)).
 
 ## SHA-256 twins (`src/sha/`)
 

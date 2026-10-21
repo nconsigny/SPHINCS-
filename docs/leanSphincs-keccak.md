@@ -7,14 +7,14 @@ parameters, with nothing re-parameterized. The on-chain verifier is `src/keccak/
 **2³⁰ signatures, proved in Lean** by the proposal (`formal/sphincs`); the sphincs-art one-signer tiers are 210K
 (Light), 22M (Standard) and 1.15B (Full).
 
-Every construction rule is the one [leanSphincs-S](leanSphincs-S-keccak.md) takes from that branch (Ethereum
+Every construction rule is the one [leanSphincs-s](leanSphincs-S-keccak.md) takes from that branch (Ethereum
 Keccak-256, the 16-byte tweak, no FORS key hash, the merged WOTS+C encoding, `h = 26`, keys, pruning, randomizer
 grind, serialization order, interface, tiers). The upstream crate is normative here: where this document and the
-crate disagree, the crate wins. Section numbers refer to the leanSphincs-S spec.
+crate disagree, the crate wins. Section numbers refer to the leanSphincs-s spec.
 
-## Differences from leanSphincs-S
+## Differences from leanSphincs-s
 
-| Spec § | leanSphincs-S | **leanSphincs** |
+| Spec § | leanSphincs-s | **leanSphincs** |
 |---|---|---|
 | §1 FORS `a` / `k` | 12 / 13 | **10 / 24** |
 | §1 WOTS+C target sum `T` | 128 | **120** (`P[Σx = 120] ≈ 1.21·10⁻³`, about 829 tries) |
@@ -59,7 +59,7 @@ must reproduce it.
 
 ## Tiers and measurements
 
-The tiers are leanSphincs-S's (Light 2^13 / 16 KiB, Standard 2^20 / 1 MiB, Full 2^26 / 16 MiB), with the proposal's
+The tiers are leanSphincs-s's (Light 2^13 / 16 KiB, Standard 2^20 / 1 MiB, Full 2^26 / 16 MiB), with the proposal's
 proved lifetimes (210K, 22M, 1.15B). Expected signing work, in Keccak-f permutations, is sphincs.art's "Tom FORS"
 figures (`scripts/keccak_model.py`, reproduced by `signers/leansphincs-keccak/tier_model.py`): 73.5K (Light), 69.9K
 (Standard), 92.2K (Full), or 13 s, 0.55 ms and 0.18 ms at the page's device rates; keygen is 1.91M / 244M / 15.6B.
@@ -75,7 +75,7 @@ included, with a VmHWM of 3.6–4.1 MB. These are host times, not device times.
 
 ## Key separation
 
-leanSphincs, leanSphincs-S and leanSphincs-f derive `P`, the WOTS and FORS secrets and the surrogates identically
+leanSphincs, leanSphincs-s and leanSphincs-f derive `P`, the WOTS and FORS secrets and the surrogates identically
 from the seed. One seed is one key of one variant: never reuse a seed across variants or tiers. The key files cannot
 be confused (each variant's has its own magic, the §14 row), but the seed is the same 32 bytes, and no signer can
 detect the reuse.

@@ -1,6 +1,6 @@
-# leanSphincs-S over keccak256
+# leanSphincs-s over keccak256
 
-leanSphincs-S is the retuned leanSphincs set from the
+leanSphincs-s is the retuned leanSphincs set from the
 [sphincs-art fork](https://nconsigny.github.io/sphincs-art/) (source:
 [nconsigny/sphincs-art](https://github.com/nconsigny/sphincs-art)); it was called leanSphincs-23 there before
 gaining one tree level (h = 25 → 26). leanSphincs itself is Tom Wambsgans' proposal
@@ -10,10 +10,10 @@ instantiation that the on-chain verifier `src/keccak/LeanSphincs-SAsm.sol` check
 
 **The construction is the upstream crate's `keccak` branch** (`crates/sphincs` on branch `keccak`, MIT OR
 Apache-2.0: Ethereum Keccak-256, the same 16-byte tweak as the BLAKE2s crate, and **no FORS key hash**: the
-WOTS+C encoding absorbs the FORS tops and then the counter), re-parameterized to leanSphincs-S: `h = 26`,
+WOTS+C encoding absorbs the FORS tops and then the counter), re-parameterized to leanSphincs-s: `h = 26`,
 FORS `k = 13`, `a = 12`, WOTS+C target sum `T = 128`. The one thing upstream does not fix for these parameters is
 the message-digest field layout (upstream's is specific to `a = 10`, two calls); §5 defines it for `a = 12`, one
-call, as for leanSphincs-23. The sphincs-art Keccak-256 figures for leanSphincs-S (259 permutations, 4,164 bytes)
+call, as for leanSphincs-23. The sphincs-art Keccak-256 figures for leanSphincs-s (259 permutations, 4,164 bytes)
 are this construction.
 
 **Differences from leanSphincs-23** (retired: [`legacy/docs/leanSphincs-23-keccak.md`](../legacy/docs/leanSphincs-23-keccak.md), verifier `legacy/src/LeanSphincs-23Asm.sol`): one more
@@ -184,8 +184,8 @@ small `b`. §14 generates a key once and signs from a key file with a bounded no
 
 **Key separation from leanSphincs-23.** `P`, the WOTS and FORS secrets and the surrogates are derived exactly as in
 leanSphincs-23, and nothing in a hash input names the parameter set. A seed used for both a leanSphincs-23 and a
-leanSphincs-S key would make the one-time key at leaf `e` sign two different encodings (a FORS key there, FORS tops
-here), which breaks its one-time security. Never use one seed for both schemes (and, within leanSphincs-S, one seed is
+leanSphincs-s key would make the one-time key at leaf `e` sign two different encodings (a FORS key there, FORS tops
+here), which breaks its one-time security. Never use one seed for both schemes (and, within leanSphincs-s, one seed is
 one key: §14).
 
 ## 10. Signing (message `m`, 32 bytes)
@@ -239,7 +239,7 @@ Forge tests decode. `lssk sign-key` (§14) prints the same bytes from a key file
 
 A tiered signer generates the key once, for a kept subtree of height `b` (§9), and stores the key with a node cache of
 bounded size. Each signature then recomputes only the auth-path nodes that the cache does not hold. The tiers are the
-"One signer, leanSphincs-S" table of the [sphincs-art fork](https://nconsigny.github.io/sphincs-art/), in the page's
+"One signer, leanSphincs-s" table of the [sphincs-art fork](https://nconsigny.github.io/sphincs-art/), in the page's
 vanilla variant (its default view, FORS with no root hash). The page's Keccak-256 figures for that table are this
 construction's, in Keccak-f permutations. There is one parameter set, and the tiers differ only in how much of the tree
 the signer builds and keeps.
@@ -338,7 +338,7 @@ so the cost of a single signature varies around this mean.
 The page's times are its permutation counts at its device rates (5.8K, 128M and 512M per second). The page figures that
 the leanSphincs-23 spec quotes (its §14) count BLAKE2s compressions; these count the Keccak-f permutations of this
 construction, so the counts carry over, and only the device rates are the page's assumptions. (The page's BLAKE2s
-figures for leanSphincs-S, 1.98M / 254M / 16.2B compressions to generate and 159K / 156K / 179K to sign, are for the
+figures for leanSphincs-s, 1.98M / 254M / 16.2B compressions to generate and 159K / 156K / 179K to sign, are for the
 BLAKE2s instantiation.) A keccak256 call over `L` bytes is `⌊L/136⌋ + 1` permutations, so the two units differ only at
 the WOTS leaf hash (8 permutations), the encoding (4 for the verifier; 3 once plus 1 per counter for the signer) and
 nowhere else.
@@ -377,7 +377,7 @@ The cover estimate is the bound of the leanSPHINCS note (the note's §3). It giv
 original leanSphincs parameters, the Lean-proved lifetimes are 4–17% below this estimate, and the gap is widest at
 small `b`. The page lowers the estimate by the gap the proofs show at the same subtree size and rounds down; those are
 its 38.2K / 2.87M / 103M, which `tier_model.py` quotes rather than recomputes. Light and Standard are rated at the
-page's design targets. Full is rated at the page's headline lifetime for leanSphincs-S, 2^26, the number of leaves:
+page's design targets. Full is rated at the page's headline lifetime for leanSphincs-s, 2^26, the number of leaves:
 the page's per-device design targets, for which the parameters were tuned, still give 2^23 for this tier, and
 `tier_model.py --check` asserts the 25% margin against those. 2^26 clears that margin under both estimates. The
 estimate depends only on `(h, b, a, k)`, so it is the same for keccak256 as for BLAKE2s. The lifetime is a count of
@@ -395,7 +395,7 @@ the signer or the key file, which keep no count of signatures.
   a Light and a Standard key from one seed overlap for 1 seed in 64. The stronger key then falls to the weaker one's
   lifetime, and the usage of the two keys adds up. Use a fresh, independent seed for every key. The plain `lssk sign`
   at the same `b` is the same key, and its signatures are identical to the tiered signer's.
-- **One seed is one scheme.** Never use a seed for both leanSphincs-23 and leanSphincs-S (§9). The two derive the same
+- **One seed is one scheme.** Never use a seed for both leanSphincs-23 and leanSphincs-s (§9). The two derive the same
   `P` and the same one-time keys, and the one at leaf `e` signs a FORS key there and the FORS tops here: two encodings
   under one one-time key. The key files cannot be confused (each CLI refuses the other's), but the seed is the same
   32 bytes, and neither signer can detect the reuse.
