@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send an EIP-8141 frame transaction (type 0x06) from a leanSphincs SphincsFrameAccount.
+"""Send an EIP-8141 frame transaction (type 0x06) from a SphincsFrameAccount (leanSphincs variants or C13).
 
 Two frames, the shape the frame module expects:
   frame[0] = VERIFY (mode 1), target = account, flags = 0x03 (APPROVE execution + payment),
@@ -141,7 +141,13 @@ def rpc(url, method, params):
 
 
 def sign_hash(signer_bin, key_file, digest: bytes) -> bytes:
-    """The leanSphincs signature over `digest`, from `<signer> sign-key` (ABI: pkSeed, pkRoot, bytes sig)."""
+    """The signature over `digest`. leanSphincs: `<signer> sign-key <key file>` (ABI: pkSeed, pkRoot, bytes sig).
+    C13 (a `.json` key file from `signer-c13 keygen`): `signer-c13 sign-with <seed> <sk_seed> <root>` (raw hex)."""
+    if key_file.endswith(".json"):
+        k = json.load(open(key_file))
+        out = subprocess.run([signer_bin, "sign-with", k["seed"], k["sk_seed"], k["root"], "0x" + digest.hex()],
+                             check=True, capture_output=True, text=True).stdout.strip()
+        return bytes.fromhex(out.removeprefix("0x"))
     out = subprocess.run([signer_bin, "sign-key", key_file, "0x" + digest.hex()], check=True, capture_output=True,
                          text=True).stdout.strip()
     abi = bytes.fromhex(out.removeprefix("0x"))
