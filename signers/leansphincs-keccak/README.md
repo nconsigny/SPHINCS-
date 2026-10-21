@@ -354,3 +354,26 @@ suites. The `leansphincs` CI job builds `lsk` and runs the cargo tests (release 
 signer's `--variant regular --selftest` (with the upstream known answer), `make_kat_fixture.py --check`, a Light-tier
 `keygen` + `sign-key` against `sign`, `tier_model.py --check` and `--json`, and these Forge suites. The `solidity` job
 also builds `lsk` before its full forge test, where the FFI tests fail rather than skip without it.
+
+## Deployments
+
+Measured in October 2026; the full record of every deployment is in [docs/deployments.md](../../docs/deployments.md).
+
+**Sepolia, verifier only.** Verifier [`0x4B1CF99FD1C9dfD6F3F4BE6751E902F71C6f0db0`](https://sepolia.etherscan.io/address/0x4B1CF99FD1C9dfD6F3F4BE6751E902F71C6f0db0). The deployed runtime is byte-identical to the build at `e22c861`. One standalone `verify` transaction with a
+real signature: [`0xb59d6e9a…`](https://sepolia.etherscan.io/tx/0xb59d6e9a77e7d5791631d614334756ead97e45f2a5476f5a5352a8fa4d673a23), **390,040 gas**.
+
+**ethrex privacy testnet (chain 8141), full EIP-8141 frame transaction.** Verifier [`0x6594157F1d690CbeBAA93dD13579FEb14E81F5C9`](https://dora.privacy.ethrex.xyz/address/0x6594157F1d690CbeBAA93dD13579FEb14E81F5C9), the
+shared frame module [`0xAA481E835ec1b82E528d6D36D432F9Af440B4295`](https://dora.privacy.ethrex.xyz/address/0xAA481E835ec1b82E528d6D36D432F9Af440B4295), and a `SphincsFrameAccount` [`0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7`](https://dora.privacy.ethrex.xyz/address/0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7) holding a fresh
+Light-tier key file (`lsk keygen --tier light`). The frame tx [`0x86d8c16f…`](https://dora.privacy.ethrex.xyz/tx/0x86d8c16fcf091851de57dcd08eddd7fd91ee34f180568506308cdd5241764404) has a VERIFY frame, where the account checks its signature over
+`compute_sig_hash(tx)` from an ARBITRARY signature entry and approves execution and payment, then a SENDER frame
+sending 0.00001 ETH. The account pays its own gas: **385,322 gas** in total, of which the VERIFY frame is **60,767**.
+
+Both transactions are priced by the calldata floor, about 64 gas per byte of the 5,684-byte signature: the verifier's
+own execution (~53 K) stays below it. To send another frame tx:
+
+```bash
+python3 script/send_frame_tx_leansphincs.py https://rpc1.privacy.ethrex.xyz <account> signers/leansphincs-keccak/target/release/lsk <key file> <recipient> <wei>
+```
+
+It dry-runs the tx with `ethrex_simulateFrameTransaction` before sending. The key files of the deployed accounts are
+not in the repository.

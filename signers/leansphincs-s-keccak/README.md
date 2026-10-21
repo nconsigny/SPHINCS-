@@ -334,3 +334,26 @@ temporary directory, then `sign-key`), whose output must equal `lssk sign <seed>
 the binary is older than the crate sources. The `leansphincs-s` CI job builds `lssk` and runs the cargo tests, the
 crosscheck, `make_kat_fixture.py --check`, a Light-tier `keygen` + `sign-key` against `sign`, `tier_model.py --check`
 and `--json`, and these Forge suites.
+
+## Deployments
+
+Measured in October 2026; the full record of every deployment is in [docs/deployments.md](../../docs/deployments.md).
+
+**Sepolia, verifier only.** Verifier [`0x7E4060786AE34E143978dF07da82A388292316a7`](https://sepolia.etherscan.io/address/0x7E4060786AE34E143978dF07da82A388292316a7). The deployed runtime is byte-identical to the build at `e22c861`. One standalone `verify` transaction with a
+real signature: [`0xd81ea86d…`](https://sepolia.etherscan.io/tx/0xd81ea86d6d9f53b9b6944462ec8eb6d2f9f185128884951c8c7be5cfc7020b81), **293,784 gas**.
+
+**ethrex privacy testnet (chain 8141), full EIP-8141 frame transaction.** Verifier [`0xae3bA3e1DC1bD3866608ECA1498D3e9263B3481a`](https://dora.privacy.ethrex.xyz/address/0xae3bA3e1DC1bD3866608ECA1498D3e9263B3481a), the
+shared frame module [`0xAA481E835ec1b82E528d6D36D432F9Af440B4295`](https://dora.privacy.ethrex.xyz/address/0xAA481E835ec1b82E528d6D36D432F9Af440B4295), and a `SphincsFrameAccount` [`0x8e2812cc597389b0E6522E610eAaeD635acbaE62`](https://dora.privacy.ethrex.xyz/address/0x8e2812cc597389b0E6522E610eAaeD635acbaE62) holding a fresh
+Light-tier key file (`lssk keygen --tier light`). The frame tx [`0x56f1d1fd…`](https://dora.privacy.ethrex.xyz/tx/0x56f1d1fd23119f716244f55956047fd0b8b650b7e51c52752ec5a272d7307993) has a VERIFY frame, where the account checks its signature over
+`compute_sig_hash(tx)` from an ARBITRARY signature entry and approves execution and payment, then a SENDER frame
+sending 0.00001 ETH. The account pays its own gas: **288,042 gas** in total, of which the VERIFY frame is **46,899**.
+
+Both transactions are priced by the calldata floor, about 64 gas per byte of the 4,164-byte signature: the verifier's
+own execution (~39 K) stays below it. To send another frame tx:
+
+```bash
+python3 script/send_frame_tx_leansphincs.py https://rpc1.privacy.ethrex.xyz <account> signers/leansphincs-s-keccak/target/release/lssk <key file> <recipient> <wei>
+```
+
+It dry-runs the tx with `ethrex_simulateFrameTransaction` before sending. The key files of the deployed accounts are
+not in the repository.

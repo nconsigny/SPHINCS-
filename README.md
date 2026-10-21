@@ -17,15 +17,15 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
 
 ## Schemes
 
-| Scheme | Family | h | d | a | k | w | l | swn | Sig | sign_h | Verify | Frame | 4337 | sec_10 | sec_14 | sec_18 | sec_20 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **C7** | WOTS+C / FORS+C | 24 | 2 | 16 | 8 | 8 | 43 | 151 | 3,704 B | 4.3 M | 96 K | 210 K | 318 K | 128 | 128 | 128 | 128 |
-| **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 46 | - | 6,592 B | ~37.3 K | ~204 K | - | - | 128 | 127.8 | 109.1 | 95.4 |
-| **C13** | WOTS+C / FORS+C | 22 | 2 | 19 | 7 | 8 | 43 | 208 | 3,688 B | ~10 M | 105 K ♦ | 188 K | 293 K | 128 | 128 | 128 | 128 |
-| **SLH-DSA-Keccak-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~94 K | - | - | 128 | 128 | 128 | 128 |
-| **leanSphincs** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 10 | 24 | 4 | 64 | 120 | 5,684 B | see below | ~53 K | - | - | 128 | 128 | 128 | 128 |
-| **leanSphincs-S** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 12 | 13 | 4 | 64 | 128 | 4,164 B | see below | ~39 K | - | - | 128 | 128 | 128 | 128 |
-| **leanSphincs-f** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 9 | 20 | 4 | 64 | 122 | 4,660 B | see below | ~44 K | - | - | 128 | 128 | 128 | 128 |
+| Scheme | Family | h | d | a | k | w | l | swn | Sig | sign_h | Verify | Verify tx | Frame | 4337 | sec_10 | sec_14 | sec_18 | sec_20 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **C7** | WOTS+C / FORS+C | 24 | 2 | 16 | 8 | 8 | 43 | 151 | 3,704 B | 4.3 M | 96 K | - | 210 K † | 318 K † | 128 | 128 | 128 | 128 |
+| **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 46 | - | 6,592 B | ~37.3 K | ~204 K | - | - | - | 128 | 127.8 | 109.1 | 95.4 |
+| **C13** | WOTS+C / FORS+C | 22 | 2 | 19 | 7 | 8 | 43 | 208 | 3,688 B | ~10 M | 105 K ♦ | **263 K** | **258 K** | 293 K † | 128 | 128 | 128 | 128 |
+| **SLH-DSA-Keccak-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~94 K | 178 K † | - | - | 128 | 128 | 128 | 128 |
+| **leanSphincs** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 10 | 24 | 4 | 64 | 120 | 5,684 B | see below | ~53 K | 390 K | 385 K | - | 128 | 128 | 128 | 128 |
+| **leanSphincs-S** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 12 | 13 | 4 | 64 | 128 | 4,164 B | see below | ~39 K | 294 K | 288 K | - | 128 | 128 | 128 | 128 |
+| **leanSphincs-f** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 9 | 20 | 4 | 64 | 122 | 4,660 B | see below | ~44 K | 325 K | 320 K | - | 128 | 128 | 128 | 128 |
 
 - **Family**: the construction style. WOTS+C / FORS+C is the C-series compact construction with counter grinding
   (ePrint 2025/2203). Vanilla SPHINCs+ is the standard FIPS 205 construction with no counter grinding: C12 and
@@ -50,12 +50,16 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
 - **Verify (pure)**: Foundry gas of the verifier call alone (`gasleft()` around the call, or the call frame via
   `vm.lastCallGas` for leanSphincs). C12's Forge e2e test prints ~665 K because it also copies the cached 6,592-B
   signature out of storage; ~204 K is the verifier itself.
-- **Frame**: total EIP-8141 frame-tx gas (ethrex). **4337**: total ERC-4337 `handleOps` tx gas (Sepolia), through
-  `SphincsAccount` + `SphincsAccountFactory`. `-` means no account has been deployed for that scheme yet (the
-  leanSphincs verifiers plug into `SphincsAccount` unchanged: `validateUserOp` is ~60.8 K, ~46.5 K and ~51.6 K in
-  Forge for leanSphincs, -S and -f).
-- Frame and 4337 were measured against the deployed verifiers, which predate the October 2026 loop optimisations
-  (C7's Verify column); a redeploy should lower each total by roughly the drop in the Verify column.
+- **Verify tx**: one standalone `verify` transaction on Sepolia, October 2026. **Frame**: one self-paying EIP-8141 frame
+  tx (VERIFY then a 0.00001 ETH SENDER transfer) on the ethrex privacy testnet (chain 8141), October 2026. Both are
+  priced by the calldata floor, about 64 gas per signature byte, so they rank by signature size, not by verifier
+  execution: C13's 3,688-B signature beats leanSphincs-S's 4,164 B even though it executes ~107 K against ~39 K.
+  **4337**: total ERC-4337 `handleOps` tx gas (Sepolia), through `SphincsAccount` + `SphincsAccountFactory`; the
+  leanSphincs verifiers plug into `SphincsAccount` unchanged (`validateUserOp` ~60.8 K / ~46.5 K / ~51.6 K in Forge).
+  Addresses and transactions: [docs/deployments.md](docs/deployments.md) and each signer's README.
+- **†** measured in June 2026 under earlier gas rules (before the 64-gas-per-byte calldata floor, on the now-defunct
+  ethrex devnet for Frame), against verifiers that predate the October 2026 loop optimisations; not comparable with
+  the October figures.
 - **♦** C13's verifier is pinned by the Lean model in `verity/`, so it does not have the loop optimisations that
   took C7 and C12 down ~22–24%. Until it does, C7 verifies cheaper than C13.
 - **SLH-DSA-Keccak-128-24** is the keccak twin of the NIST set (JARDIN 32-byte ADRS); its verifier is frozen in
