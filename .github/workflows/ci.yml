@@ -16,6 +16,9 @@ name: CI
 #   - the same for leanSphincs-f-keccak (leansphincs-f) and for leanSphincs-keccak, the
 #     upstream keccak branch at its own parameters (leansphincs), with the Python signer's
 #     self-test of each variant;
+#   - leanSphincs-layered (EthLib's leanSPHINCS): the Python reference against EthLib's own
+#     vectors and the Lean known answer, the vendored and generated fixtures, and the verifier
+#     suites (leansphincs-layered);
 #   - the frozen legacy/ verifiers, which live outside the default forge test path
 #     and so need an explicit job to be built and run at all.
 
@@ -425,6 +428,36 @@ jobs:
           EOF
       - name: forge test (KATs, tampering, spec model, random digests, verify-frame gas ceiling, 4337 account, lsk FFI round-trips)
         run: forge test --match-contract '^LeanSphincsTest$|^SphincsAccountLeanSphincsTest$' -vv
+
+  # ── leanSphincs-layered over keccak256 (src/keccak/LeanSphincs-LayeredAsm.sol): leanSPHINCS as
+  #    EthLib specifies it in Lean (ethereum/EthLib PR #152, layered key for 2^30 signatures). The
+  #    Python reference must reproduce EthLib's vendored vectors and the Lean known answer byte for
+  #    byte, the vendored fixture must be what EthLib's files at the pinned commit give, and the KAT
+  #    fixture must be what the reference signer produces. ──
+  leansphincs-layered:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python deps
+        run: pip install pycryptodome eth-abi
+      - name: Python reference vs EthLib (key_gen, sign, verify vectors and the Lean known answer, byte for byte)
+        run: python3 script/leansphincs_layered_signer.py ethlib-check test/fixtures/leansphincs-layered-ethlib.json
+      - name: Vendored EthLib fixture is what EthLib's files at the pinned commit give
+        run: |
+          d=$(mktemp -d)
+          git -C "$d" init -q
+          git -C "$d" fetch -q --depth=1 https://github.com/ethereum/EthLib.git aa99d5fcfd84e51e337383c477c48f4fba290e00
+          git -C "$d" checkout -q FETCH_HEAD
+          python3 -I script/ethlib_sphincs_fixture.py "$d" --check
+      - name: KAT fixture is what the reference signer produces
+        run: python3 script/make_leansphincs_layered_kat.py --check
+      - name: forge test (EthLib vectors, Lean known answer, KATs, tampering, per-layer target sum, spec model, random digests, gas ceiling, 4337 account, Python FFI)
+        run: forge test --match-contract '^LeanSphincsLayeredTest$|^SphincsAccountLeanSphincsLayeredTest$' -vv
 
   # ── Frozen legacy/ verifiers. These sit OUTSIDE the default `forge test` path
   #    (Foundry only scans test/), so they need an explicit job to be covered.

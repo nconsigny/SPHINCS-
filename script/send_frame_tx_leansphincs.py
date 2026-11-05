@@ -13,7 +13,9 @@ The witness is the ARBITRARY entry's bytes. Its msg is empty, so the entry is el
 hash, and the signature can only be made after the hash is known: build, hash, sign, insert.
 
 Signing uses the variant's tiered signer and a key file (`lsk` / `lssk` / `lsfk sign-key`), which
-verifies every signature before printing it. The transaction is dry-run with
+verifies every signature before printing it. For leanSphincs-layered the signer is the Python reference,
+`script/leansphincs_layered_signer.py sign-key` with an LS-LYKEY key file from its `keygen-file` (needs
+pycryptodome on the python3 that PATH resolves). The transaction is dry-run with
 ethrex_simulateFrameTransaction first and sent only if that succeeds.
 
 Wire format: the ethrex hegota-testnet encoder (lambdaclass/ethrex, scripts/hegota-testnet/frametx.py,

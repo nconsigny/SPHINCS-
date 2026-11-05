@@ -38,6 +38,8 @@ script/.jardin_spx_state.json
 script/.slhdsa_128_24_addresses.json
 script/.c13_addresses.json
 script/.c13_*_keypair.json
+# leanSphincs-layered key files (magic LS-LYKEY + the 32-byte seed: secret)
+script/.leansphincs_layered_*.key
 legacy/script/.frame_*_deploy.json
 
 # Visualization (node_modules etc.)

@@ -4,6 +4,31 @@ Every deployment recorded in the README so far (moved here unchanged when the RE
 
 EntryPoint v0.9: `0x433709009B8330FDa32311DF1C2AFA402eD8D009` (Sepolia)
 
+## 2026-11-04: leanSphincs-layered
+
+Built from the `feat/leansphincs-layered-keccak` working tree (verifier source sha256 `a13a4ed2…`, the reviewed
+version). The deployed runtime (3,283 bytes) is byte-identical to the build, and before the frame tx an `eth_call`
+of `verify` accepted the Lean known answer and the EthLib `verify_valid_known_answer` vector and rejected a changed
+message and `verify_tampered_top_last_sibling`.
+
+**ethrex privacy testnet (chain 8141), full EIP-8141 frame transaction**, the same shape as the 2026-10-20 ones:
+the shared frame module [`0xAA481E83…4295`](https://dora.privacy.ethrex.xyz/address/0xAA481E835ec1b82E528d6D36D432F9Af440B4295), one
+`SphincsFrameAccount` with a fresh key (`script/leansphincs_layered_signer.py keygen-file`), VERIFY then SENDER
+(0.00001 ETH to `0x…dEaD`), the account paying its own gas. Sent with `script/send_frame_tx_leansphincs.py`, with the
+Python signer's `sign-key` as the signer.
+
+| Contract / tx | Address or hash | Gas |
+|---|---|---|
+| Verifier `LeanSphincsLayeredAsm` | [`0xDeFd9710…0026`](https://dora.privacy.ethrex.xyz/address/0xDeFd97108a29c65968C0312573de6ef500970026) (deploy [`0x00315cd1…`](https://dora.privacy.ethrex.xyz/tx/0x00315cd1427d1de504962ce06e7ecb635a70d73d269defc3f11427a04f27348f)) | 5,282,081 |
+| Frame account | [`0x08351d32…08C0`](https://dora.privacy.ethrex.xyz/address/0x08351d320f84F93D3605C5688Ff0feFbCC2F08C0) (deploy [`0xfcb733aa…`](https://dora.privacy.ethrex.xyz/tx/0xfcb733aa06179d29a87b17b017f86232d9fda1141ea9c1a2e2ca577dde7d4130)) | 3,067,807 |
+| Frame tx (block 685,211) | [`0x902c9423…b3ab`](https://dora.privacy.ethrex.xyz/tx/0x902c942324fa1195bee3e9aa1b48fb84fdee45931250d904cd0992859985b3ab) | **516,906** |
+| VERIFY frame | | 90,385 |
+| SENDER frame | | 3,000 |
+
+The tx gas is the calldata-floor formula below to the gas, `21,546 + 64 × 7,740 = 516,906`, as it is for the
+2026-10-20 txs. The VERIFY frame is the verifier's ~82K plus the frame module's ~8K. The deploys cost more than code
+size alone suggests because this testnet prices new code as state growth (EIP-8037).
+
 ## 2026-10-20: leanSphincs, leanSphincs-s, leanSphincs-f
 
 Built from `main` at `e22c861`; each deployed runtime is byte-identical to the build.

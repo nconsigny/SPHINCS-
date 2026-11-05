@@ -26,6 +26,7 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
 | **leanSphincs** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 10 | 24 | 4 | 64 | 120 | 5,684 B | see below | ~53 K | 390 K | 385 K | - | 128 | 128 | 128 | 128 |
 | **leanSphincs-s** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 12 | 13 | 4 | 64 | 128 | 4,164 B | see below | ~39 K | 294 K | 288 K | - | 128 | 128 | 128 | 128 |
 | **leanSphincs-f** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 9 | 20 | 4 | 64 | 122 | 4,660 B | see below | ~44 K | 325 K | 320 K | - | 128 | 128 | 128 | 128 |
+| **leanSphincs-layered** | leanSphincs (WOTS+C / FORS) | 10+8+8 | 3 | 10 | 24 | 4 | 64 | 128 | 7,740 B | ~0.7 M | ~82 K | - | **517 K** | - | 128 | 128 | 128 | 128 |
 
 - **Family**: the construction style. WOTS+C / FORS+C is the C-series compact construction with counter grinding
   (ePrint 2025/2203). Vanilla SPHINCs+ is the standard FIPS 205 construction with no counter grinding: C12 and
@@ -33,7 +34,10 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
   [proposal](https://github.com/TomWambsgans/leanXMSS-leanSPHINCS-candidates): one XMSS layer, WOTS+C, and FORS
   without tree roots. leanSphincs is the proposal at its own parameters (the upstream crate's `keccak` branch),
   leanSphincs-s the [sphincs-art](https://nconsigny.github.io/sphincs-art/) parameter set, and leanSphincs-f a
-  retuning of -S for faster signing (smaller FORS trees, a larger signature).
+  retuning of -S for faster signing (smaller FORS trees, a larger signature). **leanSphincs-layered** is leanSPHINCS
+  as [EthLib](https://github.com/ethereum/EthLib/pull/152) specifies it in Lean: a hypertree of three layers
+  (heights 10, 8, 8, top first) over FORS 24×10, with its own address layout
+  ([spec](docs/leanSphincs-layered-keccak.md)).
 - **sign_h**: hash calls for keygen plus one signature on a zero-memory signer (no caching between signatures, the
   relevant case for a hardware wallet). A high number means a lot of work for the hardware. The leanSphincs variants
   keep a generated key with a small node cache instead; see [Signing](#signing).
@@ -47,6 +51,8 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
   [docs/SECURITY-ANALYSIS.md](docs/SECURITY-ANALYSIS.md). (review SLH-X-f2cap) The leanSphincs figures are for a
   full 2²⁶ key: leanSphincs's 2³⁰-signature lifetime is proved in Lean by the proposal; -S and -f are rated for 2²⁶
   signatures (sphincs-art estimates of 103 M and 119 M, not proved). A pruned key's lifetime is lower (below).
+  leanSphincs-layered's 2³⁰ lifetime (127 bits up to 1.18·10⁹ signatures) is proved in Lean by the sphincs.art
+  model it follows.
 - **Verify (pure)**: Foundry gas of the verifier call alone (`gasleft()` around the call, or the call frame via
   `vm.lastCallGas` for leanSphincs). C12's Forge e2e test prints ~665 K because it also copies the cached 6,592-B
   signature out of storage; ~204 K is the verifier itself.
@@ -55,7 +61,9 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
   priced by the calldata floor, about 64 gas per signature byte, so they rank by signature size, not by verifier
   execution: C13's 3,688-B signature beats leanSphincs-s's 4,164 B even though it executes ~107 K against ~39 K.
   **4337**: total ERC-4337 `handleOps` tx gas (Sepolia), through `SphincsAccount` + `SphincsAccountFactory`; the
-  leanSphincs verifiers plug into `SphincsAccount` unchanged (`validateUserOp` ~60.8 K / ~46.5 K / ~51.6 K in Forge).
+  leanSphincs verifiers plug into `SphincsAccount` unchanged (`validateUserOp` ~60.8 K / ~46.5 K / ~51.6 K / ~90.6 K
+  in Forge for leanSphincs / -s / -f / -layered). leanSphincs-layered is deployed on the ethrex privacy testnet only
+  (frame tx, November 2026), not on Sepolia.
   Addresses and transactions: [docs/deployments.md](docs/deployments.md) and each signer's README.
 - **†** measured in June 2026 under earlier gas rules (before the 64-gas-per-byte calldata floor, on the now-defunct
   ethrex devnet for Frame), against verifiers that predate the October 2026 loop optimisations; not comparable with
@@ -89,6 +97,7 @@ SLH-DSA count one permutation per hash call (multi-block calls add about 1%).
 | leanSphincs | 73.5 K / 69.9 K / 92.2 K permutations | **13 s** (Light) | **0.55 ms** (Standard) | **0.18 ms** (Full) |
 | leanSphincs-s | 159 K / 155 K / 178 K permutations | **27 s** (Light) | **1.2 ms** (Standard) | **0.35 ms** (Full) |
 | leanSphincs-f | 38.4 K / 34.8 K / 57.1 K permutations | **6.6 s** (Light) | **0.27 ms** (Standard) | **0.11 ms** (Full) |
+| leanSphincs-layered | ~0.5 M permutations (zero-memory) | 86 s | 3.9 ms | 1.0 ms |
 
 - **leanSphincs, -S and -f** follow the page's one-signer tiers: the key is generated once and kept with a node
   cache. Light keeps a 2¹³ subtree in 16 KiB (keygen 1.91 M permutations, 5.5 min on the Ledger), Standard a 2²⁰
@@ -97,6 +106,11 @@ SLH-DSA count one permutation per hash call (multi-block calls add about 1%).
   same in every tier. **One seed = one key of one variant**: never reuse a seed across variants or tiers. Our Rust
   signers `lsk` / `lssk` / `lsfk` take 4–9 / 7–29 / 3–12 ms per signature (Light) and 14–15 / 17–24 / 13–15 ms
   (Standard) on 8 cores, key loading and a self-check included; keygen takes 0.06 s (Light) and 8 s (Standard).
+- **leanSphincs-layered** has no tiers: a stateless signer rebuilds the top tree (2¹⁰ one-time keys, 238,593
+  permutations) and both lower trees for every signature, about half a million permutations (EthLib's figure;
+  `sign_h` above adds keygen). A signer that keeps the top tree's 2¹⁰ leaves (16 KiB) pays about half of that.
+  The only signer is the Python reference `script/leansphincs_layered_signer.py` (about 2.5 s per signature from
+  the seed on one core).
 - **SLH-DSA-128-24** on a CPU that keeps its 2²² XMSS tree in RAM (128 MB) needs ~201 M hashes: 1.6 s / 0.39 s.
   FORS (6 trees of 2²⁴ leaves) has to be rebuilt for every signature, so it stays the slowest signer here.
 - **Measured on a Ledger Nano S+ today:** our C11 and C12 signers take 390 s and 47.5 s, about 750 Keccak calls per
@@ -123,6 +137,9 @@ Hash inputs and address layouts:
   `LeanSphincs-FAsm.sol`): leanSphincs's own 16-byte tweak, `keccak256(P ‖ tweak ‖ payload)` truncated to 16 bytes,
   as on the upstream crate's `keccak` branch. Specs: [leanSphincs](docs/leanSphincs-keccak.md) (the upstream crate
   is normative), [leanSphincs-s](docs/leanSphincs-S-keccak.md), [leanSphincs-f](docs/leanSphincs-f-keccak.md).
+- **leanSphincs-layered** (`src/keccak/LeanSphincs-LayeredAsm.sol`): EthLib's 16-byte address `lo ‖ hi ‖ type+step ‖
+  layer ‖ tree ‖ 0³`, `keccak256(P ‖ address ‖ payload)` truncated to 16 bytes. Spec:
+  [leanSphincs-layered](docs/leanSphincs-layered-keccak.md) (EthLib's Lean module is normative).
 
 Key derivation (Rust/WASM signer): BIP-39 mnemonic → `HMAC-SHA512("sphincs-c6-v1", seed)` for the SPHINCs- keys,
 and BIP-32 `m/44'/60'/0'/0/0` for the independent ECDSA key. More detail: [CLAUDE.md](CLAUDE.md),
@@ -138,6 +155,7 @@ and BIP-32 `m/44'/60'/0'/0/0` for the independent ECDSA key. More detail: [CLAUD
 | leanSphincs | `signers/leansphincs-keccak` (Rust, `lsk`, tiered key files), `script/leansphincs_s_signer.py --variant regular` (Python) |
 | leanSphincs-s | `signers/leansphincs-s-keccak` (Rust, `lssk`, tiered key files), `script/leansphincs_s_signer.py` (Python) |
 | leanSphincs-f | `signers/leansphincs-f-keccak` (Rust, `lsfk`, tiered key files), `script/leansphincs_s_signer.py --variant f` (Python) |
+| leanSphincs-layered | `script/leansphincs_layered_signer.py` (Python reference; reproduces EthLib's vectors byte for byte) |
 
 Which signer targets which verifier, and how they are cross-checked: [signers/README.md](signers/README.md).
 
@@ -169,12 +187,14 @@ minutes per signature; the pinned KAT suites cover the verifier without it.
 | Sepolia | leanSphincs verifier | [`0x4B1CF99F…0db0`](https://sepolia.etherscan.io/address/0x4B1CF99FD1C9dfD6F3F4BE6751E902F71C6f0db0) |
 | Sepolia | leanSphincs-s verifier | [`0x7E406078…16a7`](https://sepolia.etherscan.io/address/0x7E4060786AE34E143978dF07da82A388292316a7) |
 | Sepolia | leanSphincs-f verifier | [`0xd7597406…011B`](https://sepolia.etherscan.io/address/0xd75974064757B7C3C7988AbD38B3D722E0d8011B) |
+| ethrex privacy testnet (8141) | leanSphincs-layered verifier / frame account (EIP-8141) | [`0xDeFd9710…0026`](https://dora.privacy.ethrex.xyz/address/0xDeFd97108a29c65968C0312573de6ef500970026), [`0x08351d32…08C0`](https://dora.privacy.ethrex.xyz/address/0x08351d320f84F93D3605C5688Ff0feFbCC2F08C0) |
 | ethrex privacy testnet (8141) | leanSphincs / -s / -f frame accounts (EIP-8141) | [`0x874f5ba1…eDD7`](https://dora.privacy.ethrex.xyz/address/0x874f5ba1d47B477CB70999795cAf7E6Bb53EeDD7), [`0x8e2812cc…aE62`](https://dora.privacy.ethrex.xyz/address/0x8e2812cc597389b0E6522E610eAaeD635acbaE62), [`0xaD6b0De1…60b7`](https://dora.privacy.ethrex.xyz/address/0xaD6b0De1E1b5792AF346E192346D120B484560b7) |
 
 EntryPoint v0.9 on Sepolia: `0x433709009B8330FDa32311DF1C2AFA402eD8D009`. The C13 verifier's code is unchanged since that deploy, and
 the SLH-DSA-SHA2 one verified the pinned KAT (`signers/slhvk-sha2-128-24/kat-counter0.json`). Older deployments, sample transactions and the (now defunct) ethrex EIP-8141 devnet:
 [docs/deployments.md](docs/deployments.md), which also lists the leanSphincs verify and frame transactions
-(frame txs: 288K gas for leanSphincs-s, 320K for -f, 385K for leanSphincs; `script/send_frame_tx_leansphincs.py`).
+(frame txs: 288K gas for leanSphincs-s, 320K for -f, 385K for leanSphincs, 517K for -layered;
+`script/send_frame_tx_leansphincs.py`).
 
 ## Formal verification
 

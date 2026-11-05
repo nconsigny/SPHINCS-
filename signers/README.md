@@ -37,6 +37,7 @@ directory), and thin Python drivers/reference signers under `script/`.
 | ″ | `leansphincs_s_signer.py --variant f` | Python | `script/` | The same independent signer at the f parameters, written from `docs/leanSphincs-f-keccak.md`. Practical for `b ≈ 6..12`. |
 | **leanSphincs** (`src/keccak/LeanSphincsAsm.sol`, keccak) | `lsk` | Rust | `signers/leansphincs-keccak/` | The upstream crate's `keccak` branch at its own parameters (`a = 10`, `k = 24`, `T = 120`, two-call digest; 5,684-B sig); its `known_answer` passes unchanged. Tiers, key-file layout and CLI as `lssk` (magic `LS-KKKEY`). Fast path for the forge FFI tests and the KAT fixture. |
 | ″ | `leansphincs_s_signer.py --variant regular` | Python | `script/` | The same independent signer at the upstream parameters (`docs/leanSphincs-keccak.md`); reproduces upstream's `known_answer` (also via `--upstream-kat`). Practical for `b ≈ 6..12`. |
+| **leanSphincs-layered** (`src/keccak/LeanSphincs-LayeredAsm.sol`, keccak) | `leansphincs_layered_signer.py` | Python | `script/` | Reference for EthLib's leanSPHINCS (PR #152, Lean-normative; 3 layers 10+8+8, FORS 24×10, T = 128; 7,740-B sig). Reproduces every EthLib `key_gen` / `sign` / `verify` vector and the Lean known answer byte for byte (`ethlib-check`). Stateless from the seed (~0.5 M hash calls, ~2.5 s per signature); FFI path for the forge tests and the KAT fixture (`make_leansphincs_layered_kat.py`). No Rust CLI, no tiers. |
 
 ## `signers/` directory contents
 
