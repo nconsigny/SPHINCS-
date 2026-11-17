@@ -520,3 +520,20 @@ jobs:
           OPTRAND=$(node -e "process.stdout.write('00'.repeat(16))")
           MSG=deadbeef00000000000000000000000000000000000000000000000000000000
           node crosscheck.mjs "$SEED" "$MSG" "$OPTRAND" ../sphincsplus-128-24/slhdsa-sha2-128-24 --H 18 --A 10
+
+  # ── SLH-DSA-Keccak-128s (C12's plain SPHINCS+ at the NIST 128s parameters): the KAT fixture
+  #    test/SLH-DSA-Keccak-128s-Test.t.sol and the account suite read must be what
+  #    script/slh_dsa_keccak_128s_signer.py produces (the signer self-verifies every vector). The
+  #    FFI round-trips run in the solidity job, which already installs pycryptodome. ──
+  slh-dsa-keccak-128s:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python deps
+        run: pip install pycryptodome
+      - name: KAT fixture is what the sources produce
+        run: python3 script/make_slh_dsa_keccak_128s_kat.py --check
