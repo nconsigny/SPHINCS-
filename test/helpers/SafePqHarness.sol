@@ -167,7 +167,10 @@ abstract contract SafePqHarness is Test {
     /// Three Safe revisions are built side by side, so forge writes their artifacts under
     /// collision-resolved directories (`out/Safe.sol`, `out/contracts/Safe.sol`, ...) and
     /// `vm.getCode("...:Safe")` cannot tell them apart. This walks the candidates and takes the
-    /// one whose metadata names `source` as its compilation target.
+    /// one whose metadata names `source` as its compilation target. The artifacts come from a
+    /// full `forge build` (or an unfiltered `forge test`): only test/safe/SafeImports*.sol
+    /// import the Safe sources, and a `forge test --match-...` run compiles just the files its
+    /// tests import.
     function _safeArtifact(string memory source, string memory name) internal view returns (bytes memory) {
         string[] memory parts = vm.split(source, "/");
         string memory suffix = "";
@@ -182,7 +185,8 @@ abstract contract SafePqHarness is Test {
                 return vm.parseJsonBytes(json, ".bytecode.object");
             }
         }
-        revert(string.concat("no artifact for ", source, ":", name));
+        // Nothing imports the Safe sources, so a filtered `forge test` does not compile them.
+        revert(string.concat("no artifact for ", source, ":", name, ": run `forge build` first"));
     }
 
     function _create(bytes memory initcode) internal returns (address a) {

@@ -299,6 +299,7 @@ Prototype, `docs/safe-pq-owners.md`. Each Safe owner is a `src/SphincsOwnerAccou
 - `test/py/frame8141_emu.py` handles two EIP revisions, chosen by a fixture's `spec` field: `af3a7802c8ea` (the C13 fixture) and `dc5d5fa688b7` (the Safe fixture: the signature hash commits to elided signature lengths, `fees = [max_fee, max_priority_fee_per_gas]`). Its `exec` command runs a whole VERIFY frame (account, module, verifier) in a metered EVM that the tests compare with revm to the unit.
 
 ```bash
+forge build   # first: a filtered forge test does not compile the Safe sources (nothing imports them) nor refresh the Yul module artifact
 forge test --match-contract '^SphincsOwnerAccountTest$' -vv               # unit, 18 tests
 forge test --match-contract '^SafePqOwners(141|150|Main)Test$' -vv        # real Safe code, lsfk over FFI, 55 tests
 forge test --match-contract '^SafePqOwnersFrame(141|150|Main)Test$' -vv   # end-to-end frame transactions, 33 tests

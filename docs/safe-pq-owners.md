@@ -234,6 +234,8 @@ path is checked against ethrex's golden vector but has not been run against a no
 ## Tests
 
 ```bash
+forge build                                                          # required first, see below
+(cd signers/leansphincs-f-keccak && cargo build --release)           # lsfk, for the FFI signatures
 forge test --match-contract '^SphincsOwnerAccountTest$' -vv          # 18 tests
 forge test --match-contract '^SafePqOwners(141|150|Main)Test$' -vv   # 55 tests, real signatures over FFI
 forge test --match-contract '^SafePqOwnersFrame(141|150|Main)Test$' -vv   # 33 tests, emulator over FFI
@@ -242,6 +244,11 @@ python3 -I test/py/gen_safe_pq_fixture.py --check                    # the fixtu
 
 The Safe sources are three submodules under `lib/`, pinned to v1.4.1, v1.5.0 and `247b8ce`. They are compiled with
 solc 0.7.6 under a separate compiler profile (`foundry.toml`), because Safe 1.4.1 does not compile under via-IR.
+
+Run `forge build` before a filtered `forge test`. The tests load the Safe and the Yul module from their build
+artifacts instead of importing them, and a `forge test --match-contract ...` run compiles only the files its tests
+import. Without the build the Safe suites fail in `setUp` with "no artifact ... run `forge build` first". An
+unfiltered `forge test` compiles everything.
 The integration tests cover a 2-of-3 and a 3-of-5 Safe: the happy path with the sender as `msg.sender` in every
 position, a bad co-signature, a co-signer that is not an owner, a duplicate owner, a shifted Safe nonce, and the
 refund to the sender.
