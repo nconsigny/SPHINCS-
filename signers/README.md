@@ -19,6 +19,7 @@ directory), and thin Python drivers/reference signers under `script/`.
 | **C13** (validation only) | `crosscheck.py` | Python | `signers/c13-crosscheck/` | Three-way Python ⟷ Rust ⟷ verifier byte-equality. |
 | **C12** (plain SPHINCS+, `src/keccak/`) | `spx_fips_signer.py` | Python | `script/` | FIPS-ADRS twin of `jardin_spx_signer.py` (reuses it with `l=46`). |
 | **C10-SHA / C11-SHA / C13-SHA** (`src/sha/`) | `signer.py` | Python | `script/signer.py` | Variants `c10-sha` / `c11-sha` / `c13-sha` (SHA-256 + 22-byte ADRSc; not FIPS). |
+| **SLH-DSA-Keccak-128s** (`src/keccak/`, plain SPHINCS+ at NIST 128s) | `slh_dsa_keccak_128s_signer.py` | Python | `script/` | C12's signer (`jardin_spx_signer.py` + FIPS ADRS) at n=16 h=63 d=7 h'=9 a=12 k=14 w=16. ~14 s/sig. KAT fixture: `make_slh_dsa_keccak_128s_kat.py [--check]`. |
 | **C12-SHA** (`src/sha/`) | `slh_dsa_sha2_c12_signer.py` | Python | `script/` | Full FIPS 205 SLH-DSA-SHA2 algorithm at the C12 parameters. |
 | **C11-BLAKE / C13-BLAKE** (`src/blake/`) | `signer.py` | Python | `script/signer.py` | Variants `c11-blake` / `c13-blake` (BLAKE2b, FIPS uncompressed ADRS). |
 | **C12-BLAKE** (`src/blake/`) | `spx_blake_signer.py` | Python | `script/` | BLAKE2b twin of `spx_fips_signer.py`. |

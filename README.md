@@ -23,6 +23,7 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
 | **C12** | vanilla SPHINCs+ | 20 | 5 | 7 | 20 | 8 | 46 | - | 6,592 B | ~37.3 K | ~204 K | - | - | - | 128 | 127.8 | 109.1 | 95.4 |
 | **C13** | WOTS+C / FORS+C | 22 | 2 | 19 | 7 | 8 | 43 | 208 | 3,688 B | ~10 M | 105 K ♦ | **263 K** | **258 K** | 293 K † | 128 | 128 | 128 | 128 |
 | **SLH-DSA-Keccak-128-24** | vanilla SPHINCs+ | 22 | 1 | 24 | 6 | 4 | 68 | - | 3,856 B | ~1.07 B | ~94 K | 178 K † | - | - | 128 | 128 | 128 | 128 |
+| **SLH-DSA-Keccak-128s** | vanilla SPHINCs+ | 63 | 7 | 12 | 14 | 16 | 35 | - | 7,872 B | ~2.48 M | ~370 K ‡ | - | - | - | 128 | 128 | 128 | 128 |
 | **leanSphincs** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 10 | 24 | 4 | 64 | 120 | 5,684 B | see below | ~53 K | 390 K | 385 K | - | 128 | 128 | 128 | 128 |
 | **leanSphincs-s** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 12 | 13 | 4 | 64 | 128 | 4,164 B | see below | ~39 K | 294 K | 288 K | - | 128 | 128 | 128 | 128 |
 | **leanSphincs-f** | leanSphincs (WOTS+C / FORS) | 26 | 1 | 9 | 20 | 4 | 64 | 122 | 4,660 B | see below | ~44 K | 325 K | 320 K | - | 128 | 128 | 128 | 128 |
@@ -70,6 +71,12 @@ of them. For constrained devices, the JARDÍN account design (SPHINCs- plus a co
   the October figures.
 - **♦** C13's verifier is pinned by the Lean model in `verity/`, so it does not have the loop optimisations that
   took C7 and C12 down ~22–24%. Until it does, C7 verifies cheaper than C13.
+- **SLH-DSA-Keccak-128s** is C12's plain SPHINCS+ (FIPS uncompressed ADRS, keccak256, same hash framing, key
+  derivation and digest parsing; H_msg domain `0xFF..FA`) at the NIST SLH-DSA-128s parameters, 2^64 signatures per
+  key (`src/keccak/SLH-DSA-Keccak-128sAsm.sol`, signer `script/slh_dsa_keccak_128s_signer.py`): a standard-parameter
+  baseline, not a SPHINCs- variant. **‡** Unlike the WOTS+C sets its verify gas varies per signature (each WOTS
+  chain runs 15 − digit steps): 360,391–382,336 in the verify frame on the KATs (`vm.lastCallGas`), `validateUserOp`
+  ~369–387 K in Forge (393 K with the cold verifier access).
 - **SLH-DSA-Keccak-128-24** is the keccak twin of the NIST set (JARDIN 32-byte ADRS); its verifier is frozen in
   [`legacy/`](legacy/README.md). The live NIST verifier is the FIPS 205 **SLH-DSA-SHA2-128-24**
   (`src/sha/`, ~142 K verify, matches the NIST/ACVP external KATs), with the same parameters and signer cost.
@@ -94,6 +101,7 @@ SLH-DSA count one permutation per hash call (multi-block calls add about 1%).
 | C12 | 37.3 K (zero-memory) | 6.4 s | 0.29 ms | 73 µs |
 | C13 | ~10 M (zero-memory) | 29 min | 78 ms | 20 ms |
 | SLH-DSA-Keccak-128-24 | ~1.07 B (zero-memory) | 51 h | 8.4 s | 2.1 s |
+| SLH-DSA-Keccak-128s | ~2.48 M (zero-memory) | 7.1 min | 19 ms | 4.8 ms |
 | leanSphincs | 73.5 K / 69.9 K / 92.2 K permutations | **13 s** (Light) | **0.55 ms** (Standard) | **0.18 ms** (Full) |
 | leanSphincs-s | 159 K / 155 K / 178 K permutations | **27 s** (Light) | **1.2 ms** (Standard) | **0.35 ms** (Full) |
 | leanSphincs-f | 38.4 K / 34.8 K / 57.1 K permutations | **6.6 s** (Light) | **0.27 ms** (Standard) | **0.11 ms** (Full) |
