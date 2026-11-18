@@ -7,3 +7,12 @@
 [submodule "lib/forge-std"]
 	path = lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "lib/safe-smart-account-1.4.1"]
+	path = lib/safe-smart-account-1.4.1
+	url = https://github.com/safe-global/safe-smart-account.git
+[submodule "lib/safe-smart-account-1.5.0"]
+	path = lib/safe-smart-account-1.5.0
+	url = https://github.com/safe-global/safe-smart-account.git
+[submodule "lib/safe-smart-account-main"]
+	path = lib/safe-smart-account-main
+	url = https://github.com/safe-global/safe-smart-account.git

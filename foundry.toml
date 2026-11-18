@@ -25,6 +25,23 @@ remappings = [
     "account-abstraction/=lib/account-abstraction/contracts/",
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
     "forge-std/=lib/forge-std/src/",
+    "safe-1.4.1/=lib/safe-smart-account-1.4.1/contracts/",
+    "safe-1.5.0/=lib/safe-smart-account-1.5.0/contracts/",
+    "safe-main/=lib/safe-smart-account-main/contracts/",
+]
+
+# Safe (safe-global/safe-smart-account) at v1.4.1, v1.5.0 and main 247b8ce, for
+# test/SafePqOwners*.t.sol: unmodified sources, pinned as submodules. They are compiled the way
+# upstream compiles them by default (solc 0.7.6, optimizer off), not with this profile: Safe
+# 1.4.1 does not compile under via_ir (stack too deep). A restriction on a file also binds every
+# file that imports it, so the only importers are the pragma-open files test/safe/SafeImports*.sol
+# and the tests load the Safe artifacts by path (vm.getCode) instead of importing them.
+additional_compiler_profiles = [
+    { name = "safe", version = "0.7.6", via_ir = false, optimizer = false },
+]
+compilation_restrictions = [
+    { paths = "lib/safe-smart-account-*/**", version = "0.7.6", via_ir = false, optimizer = false },
+    { paths = "test/safe/SafeImports*.sol", version = "0.7.6", via_ir = false, optimizer = false },
 ]
 
 # src/SphincsFrameVerify.yul is a standalone Yul object — it needs `verbatim` for the
