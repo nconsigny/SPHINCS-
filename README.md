@@ -124,8 +124,13 @@ Every verifier is deployed once, is stateless (`pure`), and is shared by all acc
 <verifier> (deployed once)
     ↑ verify(pkSeed, pkRoot, message, sig) → bool
     ├── SphincsAccount       ERC-4337 hybrid: ECDSA(owner) + SPHINCs- over userOpHash
-    └── SphincsFrameAccount  EIP-8141 pure PQ: keys as immutables, verified in a VERIFY frame
+    ├── SphincsFrameAccount  EIP-8141 pure PQ: keys as immutables, verified in a VERIFY frame
+    └── SphincsOwnerAccount  EIP-8141 owner of an unmodified Safe: VERIFY frame + isValidSignature
 ```
+
+`SphincsOwnerAccount` is a prototype for post-quantum Safe owners with leanSphincs-f: one owner sends the frame
+transaction and the Safe checks the co-signers as contract signatures. Design, invariants and measured gas (648K
+for two signers, 953K for three) are in [docs/safe-pq-owners.md](docs/safe-pq-owners.md).
 
 Hash inputs and address layouts:
 

@@ -77,6 +77,10 @@ jobs:
         run: cargo build --release
       - name: forge build
         run: forge build
+      - name: Safe PQ owners (tooling self-test; the frame-transaction fixture still reproduces, needs lsfk)
+        run: |
+          python3 script/safe_pq_owners.py selftest
+          python3 test/py/gen_safe_pq_fixture.py --check
       - name: forge test
         run: forge test -vv
 

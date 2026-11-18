@@ -21,7 +21,7 @@ SPHINCs- is a research prototype for lightweight SPHINCS+ variants on Ethereum. 
 
 **One seed is one key of one variant.** leanSphincs, leanSphincs-s, leanSphincs-f (and the retired leanSphincs-23) derive `P`, the WOTS and FORS secrets and the surrogates identically from the seed, and nothing in a hash input names the parameter set: never reuse a seed across variants or tiers. Each CLI's key file has its own magic (`LS-KKKEY` `lsk`, `LS-SKKEY` `lssk`, `LS-FKKEY` `lsfk`, `LS23KKEY` `ls23k`) and every CLI refuses the others' key files, but no signer can detect seed reuse. leanSphincs-layered derives its secrets differently (EthLib's `keccak256("leanSPHINCS" ‖ S_0)`), but the same rule holds: one seed, one variant.
 
-Accounts present in this repo use the C-series: `SphincsAccount` (ERC-4337), `SphincsAccountFactory`, `SphincsFrameAccount` (EIP-8141). `SphincsAccount` also takes the leanSphincs-23, leanSphincs-s, leanSphincs-f and leanSphincs verifiers unchanged (`legacy/test/SphincsAccountLeanSphincs23Test.t.sol`, `test/SphincsAccountLeanSphincsSTest.t.sol`, `test/SphincsAccountLeanSphincsFTest.t.sol`, `test/SphincsAccountLeanSphincsTest.t.sol`, `test/SphincsAccountLeanSphincsLayeredTest.t.sol`). The JARDIN hybrid-account stack (ECDSA + SPHINCs-) lives in the separate [nconsigny/JARDIN](https://github.com/nconsigny/JARDIN) repo.
+Accounts present in this repo use the C-series: `SphincsAccount` (ERC-4337), `SphincsAccountFactory`, `SphincsFrameAccount` (EIP-8141). `SphincsOwnerAccount` (EIP-8141, leanSphincs-f) is a post-quantum owner for an unmodified Safe: see "Safe PQ owners" below. `SphincsAccount` also takes the leanSphincs-23, leanSphincs-s, leanSphincs-f and leanSphincs verifiers unchanged (`legacy/test/SphincsAccountLeanSphincs23Test.t.sol`, `test/SphincsAccountLeanSphincsSTest.t.sol`, `test/SphincsAccountLeanSphincsFTest.t.sol`, `test/SphincsAccountLeanSphincsTest.t.sol`, `test/SphincsAccountLeanSphincsLayeredTest.t.sol`). The JARDIN hybrid-account stack (ECDSA + SPHINCs-) lives in the separate [nconsigny/JARDIN](https://github.com/nconsigny/JARDIN) repo.
 
 **Not audited, not production-safe.**
 
@@ -288,6 +288,23 @@ So a desktop-class signer that holds the XMSS tree in RAM amortises keygen acros
 ### Key derivation (C-series)
 
 BIP-39 mnemonic → HMAC-SHA512("sphincs-c6-v1", seed) → SPHINCs- keys (quantum-safe path). ECDSA derived via BIP-32 m/44'/60'/0'/0/0 (independent from the SPHINCs- path).
+
+## Safe PQ owners (`SphincsOwnerAccount`)
+
+Prototype, `docs/safe-pq-owners.md`. Each Safe owner is a `src/SphincsOwnerAccount.sol` holding one leanSphincs-f key. One owner sends `[self_verify, SENDER -> Safe.execTransaction]` from their own owner account; the Safe counts the sender as a pre-validated signature (v = 1) and checks each co-signer as a contract signature (v = 0) through `isValidSignature`. Only the sender is verified in the validation prefix, which declares 60,100 of `MAX_VERIFY_GAS = 100,000`.
+
+- The account's surface is fixed and pinned by tests: four immutables, `verifyFrameAndApprove()` / `(uint256)` (DELEGATECALL to the unchanged `SphincsFrameVerify.yul`), `isValidSignature(bytes32,bytes)` → `0x1626ba7e` (Safe ≥ 1.5.0), `isValidSignature(bytes,bytes)` → `0x20c13b0b` over `keccak256(data)` (Safe ≤ 1.4.1), `receive()`. No `execute`, no storage, no CALL. **Never wrap or re-hash what the Safe passes in.** `SphincsFrameAccount.sol` is untouched (tests pin its bytecode).
+- Safe sources are three pinned submodules, `lib/safe-smart-account-{1.4.1,1.5.0,main}` (main at `247b8ce`), compiled with solc 0.7.6, optimizer off (upstream's default), under the `safe` compiler profile in `foundry.toml`: Safe 1.4.1 does not compile under via-IR. Only `test/safe/SafeImports*.sol` import them; tests load the artifacts by path (`_safeArtifact` in `test/helpers/SafePqHarness.sol`), because three contracts named `Safe` cannot be told apart by `vm.getCode`.
+- Tooling: `script/safe_pq_owners.py` (`hash`, `cosign`, `signatures`, `frame-tx`, `selftest`), offline, standard library only. `--wire eip` is the EIP-8141 text of ethereum/EIPs master `dc5d5fa688b7` (2026-11-01); `--wire ethrex` is the testnet wire format of `send_frame_tx_leansphincs.py`.
+- `test/py/frame8141_emu.py` handles two EIP revisions, chosen by a fixture's `spec` field: `af3a7802c8ea` (the C13 fixture) and `dc5d5fa688b7` (the Safe fixture: the signature hash commits to elided signature lengths, `fees = [max_fee, max_priority_fee_per_gas]`). Its `exec` command runs a whole VERIFY frame (account, module, verifier) in a metered EVM that the tests compare with revm to the unit.
+
+```bash
+forge test --match-contract '^SphincsOwnerAccountTest$' -vv               # unit, 18 tests
+forge test --match-contract '^SafePqOwners(141|150|Main)Test$' -vv        # real Safe code, lsfk over FFI, 55 tests
+forge test --match-contract '^SafePqOwnersFrame(141|150|Main)Test$' -vv   # end-to-end frame transactions, 33 tests
+python3 script/safe_pq_owners.py selftest
+python3 -I test/py/gen_safe_pq_fixture.py --check                          # test/fixtures/safe_pq_owners_frame.json
+```
 
 ## Gas Optimizations Applied
 
