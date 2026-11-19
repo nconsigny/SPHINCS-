@@ -190,7 +190,8 @@ public mempool's 100,000-gas cap whatever the threshold.
 ![Safe PQ owners: one PQ signature in the validation prefix, the co-signers in the SENDER frame](docs/safe-pq-owners.png)
 
 A transaction with two signers costs 647,674 gas and one with three 952,826, both set by the calldata floor; one co-signature
-is 4,757 bytes. Research code, not audited, never run on a live network. Design, security invariants and gas:
+is 4,757 bytes. One 2-of-3 transaction has run on the ethrex testnet ([`0xcdcf2198…`](https://dora.privacy.ethrex.xyz/tx/0xcdcf21985c8807e9a6cbd44fff42be7d08389d0471cbbe279feacb0cdda5d446), 745,786 gas). Research code,
+not audited. Design, security invariants and gas:
 [docs/safe-pq-owners.md](docs/safe-pq-owners.md).
 
 Run it:

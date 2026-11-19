@@ -4,6 +4,32 @@ Every deployment recorded in the README so far (moved here unchanged when the RE
 
 EntryPoint v0.9: `0x433709009B8330FDa32311DF1C2AFA402eD8D009` (Sepolia)
 
+## 2026-11-19: Safe PQ owners (leanSphincs-f)
+
+Built from `main` at `2b09a0e` with `script/deploy_safe_pq_ethrex.py`, on the **ethrex privacy testnet (chain 8141)**.
+Three `SphincsOwnerAccount`s with fresh Light-tier leanSphincs-f keys own a 2-of-3 Safe 1.5.0. The Safe is built from
+`lib/safe-smart-account-1.5.0` (solc 0.7.6, optimizer off), not the official release bytecode: the canonical Safe
+deployments do not exist on this chain. The owner accounts use the leanSphincs-f verifier and frame module of
+2026-10-20 (same code as the build, apart from the verifier's metadata hash). Design and results:
+[safe-pq-owners.md](safe-pq-owners.md#on-the-ethrex-testnet).
+
+| Contract / tx | Address or hash | Gas |
+|---|---|---|
+| Owner account 0 (sender) | [`0x8624a856…8f55`](https://dora.privacy.ethrex.xyz/address/0x8624a8560b93d219200004314b434d96426a8f55) (deploy [`0x5153ef0f…`](https://dora.privacy.ethrex.xyz/tx/0x5153ef0f37946e6c38bfd48b9beb47a676126203d28d7480631df8455b51e60b)) | 2,477,216 |
+| Owner account 1 (co-signer) | [`0x559ae500…4c71`](https://dora.privacy.ethrex.xyz/address/0x559ae50033fbf0de6b54a13d068ab363fbcf4c71) (deploy [`0xcd12ccc0…`](https://dora.privacy.ethrex.xyz/tx/0xcd12ccc07b71ad9906bd24a25ce015bb19b5afb0854b9bac900f80290d0e0435)) | 2,477,216 |
+| Owner account 2 | [`0x2537d07e…8ff1`](https://dora.privacy.ethrex.xyz/address/0x2537d07e56bd56f7721d1d9914547dd5df4f8ff1) (deploy [`0xab37ad78…`](https://dora.privacy.ethrex.xyz/tx/0xab37ad78b4cc96eddd4b1e7cfc4fdfa1a4e213f6c1fdb3dc65d74d6814ba10ab)) | 2,477,216 |
+| Safe 1.5.0 singleton | [`0x0d602723…5979`](https://dora.privacy.ethrex.xyz/address/0x0d602723d7f78653a9eefaee9e93bdc944455979) (deploy [`0x7a9746be…`](https://dora.privacy.ethrex.xyz/tx/0x7a9746beeab13af8a506b81ed5cacbe3f0df7bfcce2d932ad660837260a9dd7a)) | 33,469,622 |
+| SafeProxyFactory 1.5.0 | [`0x411be15f…9cc0`](https://dora.privacy.ethrex.xyz/address/0x411be15fc959fe9ac978f559f6f2300dfea29cc0) (deploy [`0xf0ecab9f…`](https://dora.privacy.ethrex.xyz/tx/0xf0ecab9f75773df12baf26fbf24017ceaef4ad1bf68240ac5af619939bc46f75)) | 5,341,376 |
+| 2-of-3 Safe (proxy) | [`0x593cfd52…7b38`](https://dora.privacy.ethrex.xyz/address/0x593cfd52268c573b9da780038dd1b0b82c8e7b38) (create [`0x07ba4069…`](https://dora.privacy.ethrex.xyz/tx/0x07ba4069bab7212d048ee2bfbe2463f4ca24e04b7f9f1c0f20fa8f3ffb082d80)) | 1,299,284 |
+| Frame tx: Safe transfer of 0.001 ETH (block 883,831) | [`0xcdcf2198…`](https://dora.privacy.ethrex.xyz/tx/0xcdcf21985c8807e9a6cbd44fff42be7d08389d0471cbbe279feacb0cdda5d446) | **745,786** |
+| VERIFY frame | | 51,904 |
+| SENDER frame (`execTransaction`) | | 110,316 + 97,920 state |
+
+The frame tx is `[self_verify, SENDER -> Safe.execTransaction]` from owner 0's account, with owner 1's co-signature
+checked by the Safe through `isValidSignature`. Its gas is the calldata floor (647,866) plus the state gas of the
+Safe's first nonce write (97,920). Code costs most of the deploys: this testnet prices new code as state growth
+(EIP-8037), about 1,530 gas per byte. The key files are outside the repo, in `/projects/safepq-testnet-keys/`.
+
 ## 2026-11-04: leanSphincs-layered
 
 Built from the `feat/leansphincs-layered-keccak` working tree (verifier source sha256 `a13a4ed2…`, the reviewed
