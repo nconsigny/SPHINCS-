@@ -127,6 +127,10 @@ def main():
     ap.add_argument("--key-dir", default="/projects/safepq-testnet-keys")
     ap.add_argument("--state", default=os.path.join(HERE, ".frame_safepq_deploy.json"))
     ap.add_argument("--env", default=os.path.join(ROOT, ".env"))
+    ap.add_argument("--sender", type=int, default=0, help="owner index that sends the frame transaction")
+    ap.add_argument("--cosigner", type=int, default=1, help="owner index that co-signs")
+    ap.add_argument("--refund", action="store_true",
+                    help="Safe transaction with gasPrice > 0 and no refund receiver: the Safe refunds tx.origin")
     a = ap.parse_args()
 
     node = Node(a.rpc)
@@ -212,38 +216,42 @@ def main():
     print(f"Safe {safe} (2-of-3), owners " + ", ".join(o["address"] for o in st["owners"]))
 
     # funding
-    sender, cosigner = st["owners"][0], st["owners"][1]
-    for name, to, amount in (("Safe", safe, SAFE_FUNDING), ("sender owner account", sender["address"], SENDER_FUNDING)):
+    assert a.sender != a.cosigner and {a.sender, a.cosigner} <= {0, 1, 2}, "sender and co-signer: two owner indices"
+    sender, cosigner = st["owners"][a.sender], st["owners"][a.cosigner]
+    for name, to, amount in (("Safe", safe, SAFE_FUNDING), (f"owner account {a.sender} (sender)", sender["address"], SENDER_FUNDING)):
         if int(node("eth_getBalance", [to, "latest"]), 16) < amount // 2:
             dep.send(f"fund {name}", to=to, value=amount)
 
     # the Safe transaction
     safe_nonce = int.from_bytes(node.call(safe, sp.selector("nonce()")), "big")
+    refund = (30_000, 50_000, 10**9) if a.refund else (0, 0, 0)  # safeTxGas, baseGas, gasPrice
     stj = {"chainId": dep.chain_id, "safe": safe, "nonce": safe_nonce, "to": dep.acct.address,
-           "value": str(SAFE_TX_VALUE), "data": "0x", "operation": 0, "safeTxGas": 0, "baseGas": 0, "gasPrice": 0,
-           "gasToken": "0x" + "00" * 20, "refundReceiver": "0x" + "00" * 20}
+           "value": str(SAFE_TX_VALUE), "data": "0x", "operation": 0, "safeTxGas": refund[0], "baseGas": refund[1],
+           "gasPrice": refund[2], "gasToken": "0x" + "00" * 20, "refundReceiver": "0x" + "00" * 20}
     t = sp.load_safe_tx(stj)
     h = sp.safe_tx_hash(t)
     get_hash = sp.selector("getTransactionHash(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,uint256)") + \
-        t["to"].rjust(32, b"\0") + sp.w32(t["value"]) + sp.w32(320) + bytes(32 * 6) + \
-        sp.w32(safe_nonce) + sp.w32(0)
+        t["to"].rjust(32, b"\0") + sp.w32(t["value"]) + sp.w32(320) + bytes(32) + sp.w32(refund[0]) + sp.w32(refund[1]) + \
+        sp.w32(refund[2]) + bytes(64) + sp.w32(safe_nonce) + sp.w32(0)
     assert node.call(safe, get_hash) == h, "tooling Safe transaction hash != Safe.getTransactionHash"
-    print(f"Safe transaction: nonce {safe_nonce}, hash 0x{h.hex()} (matches Safe.getTransactionHash)")
+    print(f"Safe transaction: nonce {safe_nonce}, hash 0x{h.hex()} (matches Safe.getTransactionHash)"
+          + (f", refund: safeTxGas {refund[0]}, baseGas {refund[1]}, gasPrice {refund[2]}" if a.refund else ""))
 
     cos = sp.Signer(key_file=cosigner["keyFile"])
     _, _, cosig = cos.sign(h)
     is_valid = sp.selector("isValidSignature(bytes32,bytes)") + h + sp.w32(64) + sp.w32(len(cosig)) + sp.pad32(cosig)
     assert node.call(cosigner["address"], is_valid)[:4] == bytes.fromhex("1626ba7e"), "on-chain isValidSignature"
-    print(f"co-signature by owner 1: {len(cosig)} B, accepted by its owner account on chain (eth_call)")
+    print(f"co-signature by owner {a.cosigner}: {len(cosig)} B, accepted by its owner account on chain (eth_call)")
 
     blob = sp.encode_signatures([{"owner": sp.addr(cosigner["address"]), "sig": cosig},
                                  {"owner": sp.addr(sender["address"]), "s": h}])
     account_nonce = int(node("eth_getTransactionCount", [sender["address"], "latest"]), 16)
     base = int(node("eth_getBlockByNumber", ["latest", False])["baseFeePerGas"], 16)
     prio = 10**9
+    state_gas = SENDER_STATE_GAS if safe_nonce == 0 else 0
     tx = sp.build_frame_tx(chain_id=dep.chain_id, sender=sp.addr(sender["address"]), account_nonce=account_nonce,
                            safe_tx=t, signatures_blob=blob, max_fee=2 * base + prio, max_priority_fee_per_gas=prio,
-                           exec_gas=sp.default_exec_gas(1), state_gas=SENDER_STATE_GAS)
+                           exec_gas=sp.default_exec_gas(1), state_gas=state_gas)
     assert sp.public_mempool_problems(tx) == []
     digest = sp.frame_tx_sig_hash(tx, "ethrex")
     _, _, witness = sp.Signer(key_file=sender["keyFile"]).sign(digest)
@@ -251,8 +259,8 @@ def main():
     assert sp.frame_tx_sig_hash(tx, "ethrex") == digest
     raw = "0x" + sp.frame_tx_raw(tx, "ethrex").hex()
     gas = sp.frame_tx_gas(tx)
-    print(f"frame tx: sender nonce {account_nonce}, sig hash 0x{digest.hex()}, raw {len(raw) // 2 - 1:,} B, "
-          f"calldata floor {gas['calldataFloor']:,} (EIP formula)")
+    print(f"frame tx from owner {a.sender}: account nonce {account_nonce}, sig hash 0x{digest.hex()}, "
+          f"raw {len(raw) // 2 - 1:,} B, calldata floor {gas['calldataFloor']:,} (EIP formula)")
 
     sim = node("ethrex_simulateFrameTransaction", [raw])
     print("simulation:", json.dumps(sim)[:2000])
@@ -263,17 +271,24 @@ def main():
     if os.environ.get("DRY_RUN"):
         return
 
-    safe_before = int(node("eth_getBalance", [safe, "latest"]), 16)
+    bal = lambda x: int(node("eth_getBalance", [x, "latest"]), 16)  # noqa: E731
+    safe_before, sender_before = bal(safe), bal(sender["address"])
     txh = node("eth_sendRawTransaction", [raw])
     print("submitted", txh)
     r = node.receipt(txh, "frame transaction")
     keep = {k: r.get(k) for k in ("status", "blockNumber", "gasUsed", "from", "payer", "frameReceipts")}
-    print(json.dumps(keep, indent=1))
-    safe_after = int(node("eth_getBalance", [safe, "latest"]), 16)
+    fr = r.get("frameReceipts") or []
+    print(f"status {r.get('status')}, block {int(r['blockNumber'], 16)}, gas {int(r['gasUsed'], 16):,}, payer {r.get('payer')}, "
+          "frames " + ", ".join(f"{int(f['status'], 16)}:{int(f['gasUsed'], 16):,}+{int(f.get('stateGasUsed', '0x0'), 16):,}" for f in fr))
+    exec_ok = [lg for f in fr for lg in f.get("logs", [])
+               if lg["topics"][0] == "0x442e715f626346e8c54381002da614f62bee8d27386535b2521ec8540898556e"]
+    payment = int(exec_ok[0]["data"], 16) if exec_ok else None
     new_nonce = int.from_bytes(node.call(safe, sp.selector("nonce()")), "big")
-    print(f"Safe nonce {safe_nonce} -> {new_nonce}, Safe balance -{(safe_before - safe_after) / 1e18} ETH")
-    st.setdefault("frameTxs", []).append({"hash": txh, "safeTxHash": "0x" + h.hex(), "sigHash": "0x" + digest.hex(),
-                                          "rawBytes": len(raw) // 2 - 1, "receipt": keep,
+    print(f"ExecutionSuccess: {bool(exec_ok)}, payment {payment}; Safe nonce {safe_nonce} -> {new_nonce}, "
+          f"Safe balance -{(safe_before - bal(safe)) / 1e18} ETH, sender balance -{(sender_before - bal(sender['address'])) / 1e18} ETH")
+    st.setdefault("frameTxs", []).append({"hash": txh, "sender": a.sender, "cosigner": a.cosigner, "refund": a.refund,
+                                          "safeTxHash": "0x" + h.hex(), "sigHash": "0x" + digest.hex(),
+                                          "rawBytes": len(raw) // 2 - 1, "receipt": keep, "safePayment": payment,
                                           "safeNonceAfter": new_nonce})
     save()
 

@@ -25,7 +25,18 @@ deployments do not exist on this chain. The owner accounts use the leanSphincs-f
 | VERIFY frame | | 51,904 |
 | SENDER frame (`execTransaction`) | | 110,316 + 97,920 state |
 
-The frame tx is `[self_verify, SENDER -> Safe.execTransaction]` from owner 0's account, with owner 1's co-signature
+Five more Safe transactions followed the same day, with every owner as sender:
+
+| # | Frame tx | Block | Sender | Co-signer | Safe nonce | VERIFY frame | SENDER frame | Tx gas | |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | [`0xcdcf2198…`](https://dora.privacy.ethrex.xyz/tx/0xcdcf21985c8807e9a6cbd44fff42be7d08389d0471cbbe279feacb0cdda5d446) | 883,831 | 0 | 1 | 0 | 51,904 | 110,316 + 97,920 state | 745,786 | first Safe tx: nonce slot written |
+| 2 | [`0x20c29212…`](https://dora.privacy.ethrex.xyz/tx/0x20c2921202bdc8d88e1a04b0949e895a8829b5333779cbb1003e95a3ca1c19e1) | 883,905 | 1 | 2 | 1 | 51,894 | 110,473 | 647,866 |  |
+| 3 | [`0xf2bfd0b6…`](https://dora.privacy.ethrex.xyz/tx/0xf2bfd0b698dd621112cee8f680c10b98a3e268213b7856605d4822b2be7822ab) | 883,907 | 2 | 0 | 2 | 52,104 | 110,385 | 647,866 |  |
+| 4 | [`0x0fbf223c…`](https://dora.privacy.ethrex.xyz/tx/0x0fbf223c5448580962b7b87caaf499c4fdb1b4d99764424dc53dd72f9d51d063) | 883,908 | 0 | 2 | 3 | 51,885 | 110,356 | 647,866 |  |
+| 5 | [`0x82ba0690…`](https://dora.privacy.ethrex.xyz/tx/0x82ba0690cf97053d9e87227a53232baca7b0c314b3dabe47569759e4e8b44706) | 883,909 | 1 | 0 | 4 | 51,972 | 110,389 | 647,866 |  |
+| 6 | [`0x6652b9a0…`](https://dora.privacy.ethrex.xyz/tx/0x6652b9a0d231b867f9a53e554787eafa15ee508df65d5eed041b3bdf49b34821) | 883,910 | 2 | 1 | 5 | 51,924 | 120,074 | 647,866 | Safe refund of 62,394 gwei to the sender |
+
+Each frame tx is `[self_verify, SENDER -> Safe.execTransaction]` from the sender's owner account, with owner 1's co-signature
 checked by the Safe through `isValidSignature`. Its gas is the calldata floor (647,866) plus the state gas of the
 Safe's first nonce write (97,920). Code costs most of the deploys: this testnet prices new code as state growth
 (EIP-8037), about 1,530 gas per byte. The key files are outside the repo, in `/projects/safepq-testnet-keys/`.

@@ -7,7 +7,7 @@ contracts are not changed and neither is the EIP. It was checked against Safe v1
 and against the EIP-8141 text of ethereum/EIPs master `dc5d5fa688b7` (2026-11-01). EIP-8141 is a draft: re-check
 this document against the text a chain implements.
 
-One 2-of-3 Safe transaction has run on the ethrex privacy testnet (chain 8141): [`0xcdcf2198…`](https://dora.privacy.ethrex.xyz/tx/0xcdcf21985c8807e9a6cbd44fff42be7d08389d0471cbbe279feacb0cdda5d446), see
+Six 2-of-3 Safe transactions have run on the ethrex privacy testnet (chain 8141), see
 [On the ethrex testnet](#on-the-ethrex-testnet). The other numbers come from Forge (revm) and from the EIP-8141
 emulator in `test/py/frame8141_emu.py`.
 
@@ -142,9 +142,9 @@ optimizer for the Safe, which is upstream's default build.
 
 | Quantity | Estimate | Measured (Forge, emulator) | On the ethrex testnet |
 |---|---|---|---|
-| VERIFY frame gas for the sender | about 51,948 | **51,069** and **51,079** on the two fixture transactions | **51,904** |
+| VERIFY frame gas for the sender | about 51,948 | **51,069** and **51,079** on the two fixture transactions | **51,885 to 52,104** over six transactions |
 | One `isValidSignature` call | | **45,665** in its own call frame with the verifier warm, **48,165** with it cold | |
-| Total gas, 2 signers (sender and 1 co-signer) | about 648K | **647,674** | **745,786** = 647,866 + 97,920 state gas |
+| Total gas, 2 signers (sender and 1 co-signer) | about 648K | **647,674** | **647,866**, and 745,786 for the Safe's first transaction (97,920 state gas) |
 | Total gas, 3 signers (sender and 2 co-signers) | about 952K | **952,826** | |
 | One contract signature for the Safe Transaction Service | 4,757 bytes | **4,757 bytes** (65 + 32 + 4,660) | |
 
@@ -161,8 +161,9 @@ the validation prefix declares **60,100** of the 100,000 allowed. The existing
 `script/send_frame_tx_leansphincs.py` declares 300,000, which the public mempool would reject; it was not changed.
 
 The estimate of 51,948 is the VERIFY frame of the 2026-10-20 testnet transaction of a `SphincsFrameAccount`. The
-emulator's figure is about 870 lower. The testnet transaction of 2026-11-19 shows the same offset for this account:
-51,904 on ethrex against 51,069 in the emulator for the same frame shape, 835 more. So the gap is a difference in how
+emulator's figure is about 870 lower. The testnet transactions of 2026-11-19 show the same offset for this account:
+51,885 to 52,104 on ethrex against 51,069 and 51,079 in the emulator for the same frame shape, about 800 to 1,000
+more (the rest of the spread is the signature). So the gap is a difference in how
 ethrex and the emulator charge the frame, not the signature. Its cause is not identified: ethrex implements an older
 revision of the EIP than the one the emulator follows (see the wire format below).
 
@@ -245,24 +246,32 @@ not exist on this chain) and a 2-of-3 Safe. It reuses the leanSphincs-f verifier
 transaction hash against `Safe.getTransactionHash` and the co-signature against the owner account's
 `isValidSignature`, both with `eth_call`. It dry-runs the transaction with `ethrex_simulateFrameTransaction` and sends
 it only if that succeeds. The script keeps its state in `script/.frame_safepq_deploy.json` (gitignored) and can be
-rerun; `DRY_RUN=1` stops after the simulation.
+rerun; `DRY_RUN=1` stops after the simulation. Each run sends one Safe transaction; `--sender i --cosigner j` picks
+the owners and `--refund` asks the Safe for a gas refund (`safeTxGas` 30,000, `baseGas` 50,000, `gasPrice` 1 gwei,
+no refund receiver).
 
-Result, 2026-11-19, transaction [`0xcdcf2198…`](https://dora.privacy.ethrex.xyz/tx/0xcdcf21985c8807e9a6cbd44fff42be7d08389d0471cbbe279feacb0cdda5d446) in block 883,831:
+Results, 2026-11-19. Six Safe transactions of 0.001 ETH each, every owner the sender twice and every pair of
+owners used:
 
-| | Gas |
-|---|---|
-| VERIFY frame (owner 0's account checks its own signature, then approves) | 51,904 |
-| SENDER frame (`Safe.execTransaction`, owner 1's `isValidSignature` inside) | 110,316 execution, 97,920 state |
-| Transaction | **745,786** |
+| # | Frame tx | Block | Sender | Co-signer | Safe nonce | VERIFY frame | SENDER frame | Tx gas | |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | [`0xcdcf2198…`](https://dora.privacy.ethrex.xyz/tx/0xcdcf21985c8807e9a6cbd44fff42be7d08389d0471cbbe279feacb0cdda5d446) | 883,831 | 0 | 1 | 0 | 51,904 | 110,316 + 97,920 state | 745,786 | first Safe tx: nonce slot written |
+| 2 | [`0x20c29212…`](https://dora.privacy.ethrex.xyz/tx/0x20c2921202bdc8d88e1a04b0949e895a8829b5333779cbb1003e95a3ca1c19e1) | 883,905 | 1 | 2 | 1 | 51,894 | 110,473 | 647,866 |  |
+| 3 | [`0xf2bfd0b6…`](https://dora.privacy.ethrex.xyz/tx/0xf2bfd0b698dd621112cee8f680c10b98a3e268213b7856605d4822b2be7822ab) | 883,907 | 2 | 0 | 2 | 52,104 | 110,385 | 647,866 |  |
+| 4 | [`0x0fbf223c…`](https://dora.privacy.ethrex.xyz/tx/0x0fbf223c5448580962b7b87caaf499c4fdb1b4d99764424dc53dd72f9d51d063) | 883,908 | 0 | 2 | 3 | 51,885 | 110,356 | 647,866 |  |
+| 5 | [`0x82ba0690…`](https://dora.privacy.ethrex.xyz/tx/0x82ba0690cf97053d9e87227a53232baca7b0c314b3dabe47569759e4e8b44706) | 883,909 | 1 | 0 | 4 | 51,972 | 110,389 | 647,866 |  |
+| 6 | [`0x6652b9a0…`](https://dora.privacy.ethrex.xyz/tx/0x6652b9a0d231b867f9a53e554787eafa15ee508df65d5eed041b3bdf49b34821) | 883,910 | 2 | 1 | 5 | 51,924 | 120,074 | 647,866 | Safe refund of 62,394 gwei to the sender |
 
-- ethrex recognised the validation prefix as `SelfVerify` and the transaction was valid in the public mempool.
-- The Safe emitted `ExecutionSuccess` for Safe transaction hash `0x70a55e57…68e1`, its nonce went from 0 to 1 and it
-  sent 0.001 ETH to the deployer. The sender's owner account paid for the transaction.
-- The state gas is the Safe's nonce slot, written for the first time: 64 × 1,530 = 97,920, as predicted. A Safe
-  that has executed before does not pay it.
-- The rest of the transaction gas is the calldata floor: 647,866, which is 192 (three bytes at 64 gas) above the
-  EIP formula's 647,674 for the same transaction. ethrex runs an older revision of the EIP with a different
-  envelope (`nonce_keys`, three fee fields).
+- ethrex recognised every validation prefix as `SelfVerify`, and every transaction executed: the Safe emitted
+  `ExecutionSuccess` each time and its nonce went from 0 to 6. The sender's owner account paid each time.
+- **Gas.** Every transaction but the first used exactly the calldata floor, 647,866. That is 192 (three bytes at 64
+  gas) above the EIP formula's 647,674 for the same transaction, because ethrex runs an older revision of the EIP
+  with a different envelope (`nonce_keys`, three fee fields). The first also paid 97,920 state gas for the Safe's
+  nonce slot, written for the first time (64 × 1,530), as predicted.
+- **The VERIFY frame** varies with the signature, 51,885 to 52,104, always well under the declared 60,000.
+- **The refund goes to the sender.** In transaction 6 the Safe paid a refund of 62,394 gwei to `tx.origin`, which
+  in a SENDER frame is the sender's owner account. The sender's balance fell by 585,472 gwei instead of 647,866:
+  exactly the transaction fee minus the refund. The owner account's `receive()` took it.
 
 Addresses and the deploy transactions are in [deployments.md](deployments.md).
 
@@ -318,12 +327,12 @@ gas accounting. The existing commands and the existing fixture are unchanged. Ad
 
 ## Not tested
 
-- **Only one live transaction.** One 2-of-3 transaction on the ethrex testnet, which runs an older revision of
-  the EIP. The current EIP text (`--wire eip`) has not run on any node, and a 3-signer transaction, Safe 1.4.1 and
+- **Few live transactions.** Six 2-of-3 transactions on the ethrex testnet, which runs an older revision of the
+  EIP. The current EIP text (`--wire eip`) has not run on any node, and a 3-signer transaction, Safe 1.4.1 and
   Safe main have run only in Forge.
 - **In Forge, the SENDER frame is not run under EIP-8141 rules.** It runs in revm with `msg.sender` and `tx.origin`
-  set by hand. The testnet transaction covers `APPROVE`'s nonce and payment effects, fee settlement, state gas and
-  the receipt, for that one case.
+  set by hand. The testnet transactions cover `APPROVE`'s nonce and payment effects, fee settlement, state gas, the
+  Safe refund and the receipt, for those cases.
 - **The mempool's trace rules are checked only as far as the emulator goes.** It halts on storage access and banned
   opcodes and reports the two violations listed above. It is not a mempool implementation.
 - **The Safe Transaction Service** was not used. Its 5,000 limit was read from its source
