@@ -12,6 +12,8 @@ Nothing here has run on a live network. The numbers below come from Forge (revm)
 
 ## Design
 
+![Only one PQ signature is verified before payment: the sender's VERIFY frame in the validation prefix, the co-signers' isValidSignature calls in the SENDER frame](safe-pq-owners.png)
+
 Each Safe owner is a small contract, the **owner account** (`src/SphincsOwnerAccount.sol`), that holds one
 leanSphincs-f public key. A Safe transaction is one frame transaction, sent by one of the owners from their own
 owner account:

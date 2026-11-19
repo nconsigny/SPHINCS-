@@ -128,9 +128,7 @@ Every verifier is deployed once, is stateless (`pure`), and is shared by all acc
     └── SphincsOwnerAccount  EIP-8141 owner of an unmodified Safe: VERIFY frame + isValidSignature
 ```
 
-`SphincsOwnerAccount` is a prototype for post-quantum Safe owners with leanSphincs-f: one owner sends the frame
-transaction and the Safe checks the co-signers as contract signatures. Design, invariants and measured gas (648K
-for two signers, 953K for three) are in [docs/safe-pq-owners.md](docs/safe-pq-owners.md).
+`SphincsOwnerAccount` is a prototype for post-quantum Safe owners: see [Safe PQ owners](#safe-pq-owners) below.
 
 Hash inputs and address layouts:
 
@@ -179,6 +177,44 @@ FOUNDRY_TEST=legacy/test forge test   # frozen legacy verifiers (includes two sl
 
 The skipped SLH-DSA suites sign at NIST parameters with `signers/sphincsplus-128-24` (`make` it first), which takes
 minutes per signature; the pinned KAT suites cover the verifier without it.
+
+## Safe PQ owners
+
+A prototype that lets an **unmodified Safe** (v1.4.1, v1.5.0, main) use leanSphincs-f keys as owners on an EIP-8141
+chain. Each owner is a `SphincsOwnerAccount` holding one key. One owner sends a frame transaction from their own
+owner account: its VERIFY frame checks only that owner's signature, and its SENDER frame calls
+`Safe.execTransaction`, where the Safe counts the sender as `msg.sender` and checks every co-signer through
+`isValidSignature`. Only one signature is verified before payment, so the validation prefix stays under the
+public mempool's 100,000-gas cap whatever the threshold.
+
+![Safe PQ owners: one PQ signature in the validation prefix, the co-signers in the SENDER frame](docs/safe-pq-owners.png)
+
+A transaction with two signers costs 647,674 gas and one with three 952,826, both set by the calldata floor; one co-signature
+is 4,757 bytes. Research code, not audited, never run on a live network. Design, security invariants and gas:
+[docs/safe-pq-owners.md](docs/safe-pq-owners.md).
+
+Run it:
+
+```bash
+git submodule update --init                                  # includes the three pinned Safe versions
+(cd signers/leansphincs-f-keccak && cargo build --release)   # lsfk, the leanSphincs-f signer
+forge build                                                  # needed before a filtered forge test
+forge test --match-contract '^SphincsOwnerAccountTest$'                    # the owner account
+forge test --match-contract '^SafePqOwners(141|150|Main)Test$'             # real Safe code, real signatures
+forge test --match-contract '^SafePqOwnersFrame(141|150|Main)Test$'        # end-to-end frame transactions (emulator)
+```
+
+Build a transaction with the offline tooling (it never contacts a node):
+
+```bash
+python3 script/safe_pq_owners.py hash safe-tx.json                                    # Safe transaction hash
+python3 script/safe_pq_owners.py cosign safe-tx.json --owner 0x<co-signer account> \
+        --key-file cosigner.lsfk -o cosig.json                                        # one co-signature
+python3 script/safe_pq_owners.py frame-tx safe-tx.json --sender 0x<sender account> \
+        --account-nonce 0 --base-fee 1000000000 --key-file sender.lsfk cosig.json -o tx.json
+```
+
+The format of `safe-tx.json` and every option are in `python3 script/safe_pq_owners.py --help`.
 
 ## Deployments
 
